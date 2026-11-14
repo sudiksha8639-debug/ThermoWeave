@@ -3,6 +3,8 @@ import { AppProvider, useApp } from './state';
 import { Story } from './screens/Story';
 import { Workspace } from './screens/Workspace';
 import { Proof } from './screens/Proof';
+import { DataSourcesPanel } from './components/DataSourcesPanel';
+import { ConnectionBadge } from './components/CacheControls';
 import { ACCENT } from './theme';
 
 const NAV = [
@@ -57,9 +59,13 @@ function Shell() {
       </main>
 
       <footer className="border-t border-line bg-surface-2/60">
-        <p className="mx-auto max-w-[1400px] px-4 py-3 text-center text-xs text-ink-dim">
-          Not an official fire alert, perimeter map or emergency tool.
-        </p>
+        <div className="mx-auto max-w-[1400px] space-y-2 px-4 py-3">
+          <ConnectionBadge />
+          <DataSourcesPanel />
+          <p className="text-center text-xs text-ink-dim">
+            Not an official fire alert, perimeter map or emergency tool.
+          </p>
+        </div>
       </footer>
     </div>
   );

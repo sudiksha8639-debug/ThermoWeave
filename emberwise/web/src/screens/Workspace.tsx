@@ -25,6 +25,7 @@ import { SeriesChartSlot } from '../components/SeriesChart';
 import { FireClockDialSlot } from '../components/FireClockDial';
 import { CsvPanel } from '../components/CsvPanel';
 import { InspectPanel } from '../components/InspectPanel';
+import { ThisMonthCard } from '../components/ThisMonthCard';
 import { LabelChip } from '../components/LabelChip';
 import { INK_DIM, LINE, viridis } from '../theme';
 
@@ -250,6 +251,7 @@ export function Workspace() {
             geometry={geomQ.data?.tile_geometry ?? []}
             valueCol={valueCol}
           />
+          <ThisMonthCard regionId={regionId} />
           {/* SLOT: teammate drops in the real dial here */}
           <FireClockDialSlot hourly={hourlyQ.data} />
           {/* SLOT: teammate drops in climatology panel here */}
