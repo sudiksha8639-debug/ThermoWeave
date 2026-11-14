@@ -96,9 +96,9 @@ REGIONS = contract({
         "kind": string("preset = selectable in the app; control = Lab negative control only.",
                        enum=["preset", "control"]),
         "default": boolean("true for the preset the app opens with."),
-        "tiles_in_scope": obj({f"r{r}": integer(f"Tiles whose centroid is inside, H3 res {r}.")
+        "tiles_in_scope": obj({f"r{r}": integer(f"Tiles whose centroid is inside, H3 res {r}.", null=(r != C.H3_RES))
                                for r in C.SENSITIVITY_RES},
-                              "Clipped tile counts; r6 is the saturation cap."),
+                              "Clipped tile counts; r6 is the saturation cap. r5/r7 are null where M1 has not supplied them."),
         "boundary_source": string("Boundary data source and licence."),
         "bbox": arr(num(), "[west, south, east, north] in degrees.", n=4),
     })),
@@ -214,13 +214,27 @@ VALIDATION = contract({
         "global_ratio": num("Error using one global ratio.", null=True),
         "no_conversion": num("Error using raw MODIS tile-days.", null=True),
         "beats_both": boolean("per_zone_month lower than both baselines.", null=True),
-    }), "M3 / M1. Per zone-month conversion against two simpler baselines."),
+        "zone_month_level": obj({
+            "n": integer("Zone-month-years compared."),
+            "per_zone_month": num("Error of the per zone-month conversion.", null=True),
+            "global_ratio": num("Error using one global ratio.", null=True),
+            "no_conversion": num("Error using raw MODIS tile-days.", null=True),
+            "beats_both": boolean("per_zone_month lower than both baselines.", null=True),
+        }, "The same comparison for each zone, month and hidden year (finer than a preset-year).", null=True),
+    }), "M3 / M1. Per zone-month conversion against two simpler baselines, at preset-year level."),
     "rank_test": check(typed({
         "method": string("How seasonality was removed."),
         "rho": num("Spearman rho, as found.", null=True),
         "threshold": num("Pass mark."),
         "passed": boolean("rho >= threshold.", null=True),
         "n": integer("Pairs."),
+        "other_method": obj({
+            "method": string("The alternative way of removing seasonality."),
+            "rho": num("Spearman rho, as found.", null=True),
+            "threshold": num("Pass mark."),
+            "passed": boolean("rho >= threshold.", null=True),
+            "n": integer("Pairs."),
+        }, "The same test by the other allowed method, reported for transparency.", null=True),
     }), "M3 / M1. Does the harmonized record rank periods the way VIIRS does?"),
     "seam_step": check(OPEN_RESULT, "M5 / M2. Size of the 2012 step before and after harmonizing."),
     "era_b_test": check(OPEN_RESULT, "M2 / M3. Terra to Terra U Aqua conversion on 2003-2011."),
@@ -423,7 +437,8 @@ PARQUET: dict[str, tuple[str, dict[str, str], str]] = {
         "region": "str", "h3_r6": "str", "zone_r3": "str", "date": "date", "sensor_set": "str",
         "product": "str", "frp_sum": "float", "n_hotspots": "int", "n_tile_day": "int",
     }, "M1 -> M2, M3. Sparse: one row per region, res-6 tile, local solar date and sensor set with a "
-       "clean hotspot. region is punjab, haryana or control. [verify: Parquet as the hand-off format]"),
+       "clean DAY-pass hotspot (plan s2: day passes only for the headline). n_tile_day is 1 per row; "
+       "MODIS_ALL is the union of Terra and Aqua flags, never a sum. region is punjab, haryana or control."),
     "tiles": ("tiles.parquet", {"region": "str", "h3_r6": "str", "zone_r3": "str"},
               "M1 -> M3. [verify: M3 request, not in the plan] Every in-scope res-6 tile, including tiles "
               "that never burn; needed for geometry and tile counts."),

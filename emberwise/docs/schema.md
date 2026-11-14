@@ -1,4 +1,4 @@
-# EMBERWISE data contract (schema_version 1.0)
+# EMBERWISE data contract (schema_version 1.1)
 
 Generated from `pipeline/tables/contracts.py`. Do not edit by hand.
 Owner: M3. Deputy: M6 (additive changes only while M3 sleeps, H16-20). Protocol: `CHANGELOG.md`.
@@ -26,7 +26,7 @@ M6, M1 -> M3, M4. Three presets and the control district.
 
 | field | type | meaning |
 |---|---|---|
-| `schema_version` | const "1.0" | Contract version; bumped on any schema change. |
+| `schema_version` | const "1.1" | Contract version; bumped on any schema change. |
 | `generated_at` | string | UTC build time, ISO 8601. |
 | `mock` | boolean | true = synthetic mock data, never to be shown or quoted as real. |
 | `regions` | array[object] |  |
@@ -34,10 +34,10 @@ M6, M1 -> M3, M4. Three presets and the control district.
 | `regions[].label` | string | Display label. Results are always labelled 'Indian Punjab and Haryana' style. |
 | `regions[].kind` | string (preset, control) | preset = selectable in the app; control = Lab negative control only. |
 | `regions[].default` | boolean | true for the preset the app opens with. |
-| `regions[].tiles_in_scope` | object | Clipped tile counts; r6 is the saturation cap. |
-| `regions[].tiles_in_scope.r5` | integer | Tiles whose centroid is inside, H3 res 5. |
+| `regions[].tiles_in_scope` | object | Clipped tile counts; r6 is the saturation cap. r5/r7 are null where M1 has not supplied them. |
+| `regions[].tiles_in_scope.r5` | integer | null | Tiles whose centroid is inside, H3 res 5. |
 | `regions[].tiles_in_scope.r6` | integer | Tiles whose centroid is inside, H3 res 6. |
-| `regions[].tiles_in_scope.r7` | integer | Tiles whose centroid is inside, H3 res 7. |
+| `regions[].tiles_in_scope.r7` | integer | null | Tiles whose centroid is inside, H3 res 7. |
 | `regions[].boundary_source` | string | Boundary data source and licence. |
 | `regions[].bbox` | array[number] x4 | [west, south, east, north] in degrees. |
 
@@ -47,7 +47,7 @@ M1 -> M3, M5. Which sensor had data on which days (Jan 2012 is partial).
 
 | field | type | meaning |
 |---|---|---|
-| `schema_version` | const "1.0" | Contract version; bumped on any schema change. |
+| `schema_version` | const "1.1" | Contract version; bumped on any schema change. |
 | `generated_at` | string | UTC build time, ISO 8601. |
 | `mock` | boolean | true = synthetic mock data, never to be shown or quoted as real. |
 | `epoch` | string | Date of day index 0. |
@@ -66,7 +66,7 @@ M1 -> M5. When each satellite looked (Fire Clock Dial).
 
 | field | type | meaning |
 |---|---|---|
-| `schema_version` | const "1.0" | Contract version; bumped on any schema change. |
+| `schema_version` | const "1.1" | Contract version; bumped on any schema change. |
 | `generated_at` | string | UTC build time, ISO 8601. |
 | `mock` | boolean | true = synthetic mock data, never to be shown or quoted as real. |
 | `satellites` | array[string] | Satellite names; code = index. |
@@ -84,7 +84,7 @@ M1 -> M5. Overpass-time drift per satellite, plus the ratio-by-year series.
 
 | field | type | meaning |
 |---|---|---|
-| `schema_version` | const "1.0" | Contract version; bumped on any schema change. |
+| `schema_version` | const "1.1" | Contract version; bumped on any schema change. |
 | `generated_at` | string | UTC build time, ISO 8601. |
 | `mock` | boolean | true = synthetic mock data, never to be shown or quoted as real. |
 | `satellites` | array[string] | Satellite names; code = index. |
@@ -108,7 +108,7 @@ M2 -> M3, M5. Per zone-month MODIS to VIIRS-scale conversion.
 
 | field | type | meaning |
 |---|---|---|
-| `schema_version` | const "1.0" | Contract version; bumped on any schema change. |
+| `schema_version` | const "1.1" | Contract version; bumped on any schema change. |
 | `generated_at` | string | UTC build time, ISO 8601. |
 | `mock` | boolean | true = synthetic mock data, never to be shown or quoted as real. |
 | `unit` | string | What the ratio converts. |
@@ -139,7 +139,7 @@ M2, M3, M5 -> M5. Validation evidence, shown in the Lab whatever it reveals.
 
 | field | type | meaning |
 |---|---|---|
-| `schema_version` | const "1.0" | Contract version; bumped on any schema change. |
+| `schema_version` | const "1.1" | Contract version; bumped on any schema change. |
 | `generated_at` | string | UTC build time, ISO 8601. |
 | `mock` | boolean | true = synthetic mock data, never to be shown or quoted as real. |
 | `hide_a_year` | object | M2 / M3. Predict each hidden year from MODIS alone. |
@@ -160,7 +160,7 @@ M2, M3, M5 -> M5. Validation evidence, shown in the Lab whatever it reveals.
 | `error_by_level.status` | string (pending, done) | pending = not yet run on real data. |
 | `error_by_level.label` | string (Measured, Estimated, Indicative, Provisional) | Value label. |
 | `error_by_level.result` | object | null | Shape defined by the owner (M2 or M5); to be closed by M3 once delivered. |
-| `baselines` | object | M3 / M1. Per zone-month conversion against two simpler baselines. |
+| `baselines` | object | M3 / M1. Per zone-month conversion against two simpler baselines, at preset-year level. |
 | `baselines.owner` | string | Who wrote the check. |
 | `baselines.reviewer` | string | Who reviews it before merge (never the owner). |
 | `baselines.status` | string (pending, done) | pending = not yet run on real data. |
@@ -172,6 +172,12 @@ M2, M3, M5 -> M5. Validation evidence, shown in the Lab whatever it reveals.
 | `baselines.result.global_ratio` | number | null | Error using one global ratio. |
 | `baselines.result.no_conversion` | number | null | Error using raw MODIS tile-days. |
 | `baselines.result.beats_both` | boolean | null | per_zone_month lower than both baselines. |
+| `baselines.result.zone_month_level` | object | null | The same comparison for each zone, month and hidden year (finer than a preset-year). |
+| `baselines.result.zone_month_level.n` | integer | Zone-month-years compared. |
+| `baselines.result.zone_month_level.per_zone_month` | number | null | Error of the per zone-month conversion. |
+| `baselines.result.zone_month_level.global_ratio` | number | null | Error using one global ratio. |
+| `baselines.result.zone_month_level.no_conversion` | number | null | Error using raw MODIS tile-days. |
+| `baselines.result.zone_month_level.beats_both` | boolean | null | per_zone_month lower than both baselines. |
 | `rank_test` | object | M3 / M1. Does the harmonized record rank periods the way VIIRS does? |
 | `rank_test.owner` | string | Who wrote the check. |
 | `rank_test.reviewer` | string | Who reviews it before merge (never the owner). |
@@ -183,6 +189,12 @@ M2, M3, M5 -> M5. Validation evidence, shown in the Lab whatever it reveals.
 | `rank_test.result.threshold` | number | Pass mark. |
 | `rank_test.result.passed` | boolean | null | rho >= threshold. |
 | `rank_test.result.n` | integer | Pairs. |
+| `rank_test.result.other_method` | object | null | The same test by the other allowed method, reported for transparency. |
+| `rank_test.result.other_method.method` | string | The alternative way of removing seasonality. |
+| `rank_test.result.other_method.rho` | number | null | Spearman rho, as found. |
+| `rank_test.result.other_method.threshold` | number | Pass mark. |
+| `rank_test.result.other_method.passed` | boolean | null | rho >= threshold. |
+| `rank_test.result.other_method.n` | integer | Pairs. |
 | `seam_step` | object | M5 / M2. Size of the 2012 step before and after harmonizing. |
 | `seam_step.owner` | string | Who wrote the check. |
 | `seam_step.reviewer` | string | Who reviews it before merge (never the owner). |
@@ -242,10 +254,10 @@ M2 -> M5, M6. Sensor-Loss simulation on the last full season.
 
 | field | type | meaning |
 |---|---|---|
-| `schema_version` | const "1.0" | Contract version; bumped on any schema change. |
+| `schema_version` | const "1.1" | Contract version; bumped on any schema change. |
 | `generated_at` | string | UTC build time, ISO 8601. |
 | `mock` | boolean | true = synthetic mock data, never to be shown or quoted as real. |
-| `region` | string (punjab, haryana, punjab_haryana) | Preset id. |
+| `region` | string (indian_punjab, haryana, punjab_haryana) | Preset id. |
 | `season` | integer | Year of the Oct-Nov season simulated. |
 | `relay_satellite` | string | Satellite that takes over from Suomi NPP. |
 | `overlap_years` | array[integer] | Shared years used to align the relay (excluding the season). |
@@ -262,7 +274,7 @@ M3 -> M4. File name tile_month_YYYY.json.
 
 | field | type | meaning |
 |---|---|---|
-| `schema_version` | const "1.0" | Contract version; bumped on any schema change. |
+| `schema_version` | const "1.1" | Contract version; bumped on any schema change. |
 | `generated_at` | string | UTC build time, ISO 8601. |
 | `mock` | boolean | true = synthetic mock data, never to be shown or quoted as real. |
 | `year` | integer | Calendar year of this file (one file per year, lazy loaded). |
@@ -289,7 +301,7 @@ M3 -> M4. Precomputed hexagons so the browser needs no H3 library.
 
 | field | type | meaning |
 |---|---|---|
-| `schema_version` | const "1.0" | Contract version; bumped on any schema change. |
+| `schema_version` | const "1.1" | Contract version; bumped on any schema change. |
 | `generated_at` | string | UTC build time, ISO 8601. |
 | `mock` | boolean | true = synthetic mock data, never to be shown or quoted as real. |
 | `res` | integer | H3 resolution of tiles. |
@@ -313,7 +325,7 @@ M3 -> M4. Daily series for the three presets only.
 
 | field | type | meaning |
 |---|---|---|
-| `schema_version` | const "1.0" | Contract version; bumped on any schema change. |
+| `schema_version` | const "1.1" | Contract version; bumped on any schema change. |
 | `generated_at` | string | UTC build time, ISO 8601. |
 | `mock` | boolean | true = synthetic mock data, never to be shown or quoted as real. |
 | `epoch` | string | Date of day index 0; array position = days since epoch. |
@@ -332,18 +344,6 @@ M3 -> M4. Daily series for the three presets only.
 | `presets.<preset>.frac_burning` | array[number | null] | harm / tile_count; above about 0.5 = near saturation. |
 | `presets.<preset>.pct_rank` | array[number | null] | Position 0-100 of harm among all years within +/-7 days of the same day of year. [verify definition] |
 | `presets.<preset>.label` | array[integer] | Label code per day. |
-| `presets.<preset>_haryana` | object |  |
-| `presets.<preset>_haryana.tile_count` | integer | In-scope res-6 tiles; cap for harm. |
-| `presets.<preset>_haryana.modis_td` | array[integer | null] | Tiles with a MODIS detection; null when MODIS had no data. |
-| `presets.<preset>_haryana.viirs_td` | array[integer | null] | Tiles with a VIIRS detection; null before VIIRS existed or in a gap. |
-| `presets.<preset>_haryana.modis_hotspots` | array[integer | null] | MODIS hotspot count (plain-count view). |
-| `presets.<preset>_haryana.viirs_hotspots` | array[integer | null] | VIIRS hotspot count (plain-count view). |
-| `presets.<preset>_haryana.harm` | array[number | null] | Harmonized relative burning activity, VIIRS-scale tile-days. |
-| `presets.<preset>_haryana.lo` | array[number | null] | Lower range. |
-| `presets.<preset>_haryana.hi` | array[number | null] | Upper range. |
-| `presets.<preset>_haryana.frac_burning` | array[number | null] | harm / tile_count; above about 0.5 = near saturation. |
-| `presets.<preset>_haryana.pct_rank` | array[number | null] | Position 0-100 of harm among all years within +/-7 days of the same day of year. [verify definition] |
-| `presets.<preset>_haryana.label` | array[integer] | Label code per day. |
 
 ### climatology: `climatology.json`
 
@@ -351,7 +351,7 @@ M3 -> M4. Per-sensor weekly percentiles from each sensor's own history (Local No
 
 | field | type | meaning |
 |---|---|---|
-| `schema_version` | const "1.0" | Contract version; bumped on any schema change. |
+| `schema_version` | const "1.1" | Contract version; bumped on any schema change. |
 | `generated_at` | string | UTC build time, ISO 8601. |
 | `mock` | boolean | true = synthetic mock data, never to be shown or quoted as real. |
 | `weeks` | integer | Weeks per year (week = min((day_of_year-1)//7, 51)). |
@@ -373,21 +373,6 @@ M3 -> M4. Per-sensor weekly percentiles from each sensor's own history (Local No
 | `presets.<preset>.viirs.p75` | array[number | null] x52 | P75 per week of year. |
 | `presets.<preset>.viirs.p90` | array[number | null] x52 | P90 per week of year. |
 | `presets.<preset>.viirs.n_years` | integer | Complete years behind the percentiles. |
-| `presets.<preset>_haryana` | object |  |
-| `presets.<preset>_haryana.modis` | object |  |
-| `presets.<preset>_haryana.modis.p10` | array[number | null] x52 | P10 per week of year. |
-| `presets.<preset>_haryana.modis.p25` | array[number | null] x52 | P25 per week of year. |
-| `presets.<preset>_haryana.modis.p50` | array[number | null] x52 | P50 per week of year. |
-| `presets.<preset>_haryana.modis.p75` | array[number | null] x52 | P75 per week of year. |
-| `presets.<preset>_haryana.modis.p90` | array[number | null] x52 | P90 per week of year. |
-| `presets.<preset>_haryana.modis.n_years` | integer | Complete years behind the percentiles. |
-| `presets.<preset>_haryana.viirs` | object |  |
-| `presets.<preset>_haryana.viirs.p10` | array[number | null] x52 | P10 per week of year. |
-| `presets.<preset>_haryana.viirs.p25` | array[number | null] x52 | P25 per week of year. |
-| `presets.<preset>_haryana.viirs.p50` | array[number | null] x52 | P50 per week of year. |
-| `presets.<preset>_haryana.viirs.p75` | array[number | null] x52 | P75 per week of year. |
-| `presets.<preset>_haryana.viirs.p90` | array[number | null] x52 | P90 per week of year. |
-| `presets.<preset>_haryana.viirs.n_years` | integer | Complete years behind the percentiles. |
 
 ### periods: `periods.json`
 
@@ -395,7 +380,7 @@ M3 -> M4. Critical periods of unusually high relative burning activity.
 
 | field | type | meaning |
 |---|---|---|
-| `schema_version` | const "1.0" | Contract version; bumped on any schema change. |
+| `schema_version` | const "1.1" | Contract version; bumped on any schema change. |
 | `generated_at` | string | UTC build time, ISO 8601. |
 | `mock` | boolean | true = synthetic mock data, never to be shown or quoted as real. |
 | `method` | object |  |
@@ -415,16 +400,6 @@ M3 -> M4. Critical periods of unusually high relative burning activity.
 | `presets.<preset>[].peak_value` | number | Highest 7-day mean harmonized value. |
 | `presets.<preset>[].label` | string (Measured, Estimated, Indicative, Provisional) | Value label. |
 | `presets.<preset>[].sentence` | string | Template-written sentence. |
-| `presets.<preset>_haryana` | array[object] |  |
-| `presets.<preset>_haryana[].start` | string | First day. |
-| `presets.<preset>_haryana[].end` | string | Last day. |
-| `presets.<preset>_haryana[].days` | integer | Length. |
-| `presets.<preset>_haryana[].status` | string (firm, tentative) | firm = whole lower range above P90; otherwise tentative. |
-| `presets.<preset>_haryana[].severity` | number | null | Excess over the median, as a ratio (0.8 = 80% above). |
-| `presets.<preset>_haryana[].peak_date` | string | Day of the highest 7-day value. |
-| `presets.<preset>_haryana[].peak_value` | number | Highest 7-day mean harmonized value. |
-| `presets.<preset>_haryana[].label` | string (Measured, Estimated, Indicative, Provisional) | Value label. |
-| `presets.<preset>_haryana[].sentence` | string | Template-written sentence. |
 
 ### narratives: `narratives.json`
 
@@ -432,7 +407,7 @@ M3 -> M4. This-month numbers, Local Normal badge and plain sentences per preset.
 
 | field | type | meaning |
 |---|---|---|
-| `schema_version` | const "1.0" | Contract version; bumped on any schema change. |
+| `schema_version` | const "1.1" | Contract version; bumped on any schema change. |
 | `generated_at` | string | UTC build time, ISO 8601. |
 | `mock` | boolean | true = synthetic mock data, never to be shown or quoted as real. |
 | `as_of` | string | Last day of data. |
@@ -466,29 +441,6 @@ M3 -> M4. This-month numbers, Local Normal badge and plain sentences per preset.
 | `presets.<preset>.local_normal.flag` | string | null (both_elevated, viirs_only, modis_only, neither) | Flag. |
 | `presets.<preset>.local_normal.label` | string (Measured, Estimated, Indicative, Provisional) | Value label. |
 | `presets.<preset>.local_normal.sentence` | string | Cautious wording for the badge. |
-| `presets.<preset>_haryana` | object |  |
-| `presets.<preset>_haryana.this_month` | object |  |
-| `presets.<preset>_haryana.this_month.month` | string | Month described, YYYY-MM. |
-| `presets.<preset>_haryana.this_month.in_progress` | boolean | true = compared with the same days of past years. |
-| `presets.<preset>_haryana.this_month.days_compared` | integer | Days of the month used. |
-| `presets.<preset>_haryana.this_month.value` | number | null | Harmonized activity over those days. |
-| `presets.<preset>_haryana.this_month.typical_median` | number | null | Median of the same days in other years. |
-| `presets.<preset>_haryana.this_month.pct_diff` | number | null | Percent difference from the median. |
-| `presets.<preset>_haryana.this_month.rank_higher_than` | integer | null | Past years this year exceeds. |
-| `presets.<preset>_haryana.this_month.rank_of` | integer | Past years compared. |
-| `presets.<preset>_haryana.this_month.middle_half` | array[number | null] x2 | [P25, P75] of past years. |
-| `presets.<preset>_haryana.this_month.percentile` | number | null | Position among past years, 0-100. |
-| `presets.<preset>_haryana.this_month.band` | string | null (much below, below, near, above, much above) | Band label. |
-| `presets.<preset>_haryana.this_month.basis` | string | Evidence the number rests on. |
-| `presets.<preset>_haryana.this_month.label` | string (Measured, Estimated, Indicative, Provisional) | Value label. |
-| `presets.<preset>_haryana.this_month.near_saturation` | boolean | true if a day in the window exceeded about 50% of tiles. |
-| `presets.<preset>_haryana.this_month.variant` | string | Template keys used. |
-| `presets.<preset>_haryana.this_month.sentence` | string | Plain sentence shown on the This-month card. |
-| `presets.<preset>_haryana.local_normal` | object |  |
-| `presets.<preset>_haryana.local_normal.week_start` | string | First day of the latest complete week. |
-| `presets.<preset>_haryana.local_normal.flag` | string | null (both_elevated, viirs_only, modis_only, neither) | Flag. |
-| `presets.<preset>_haryana.local_normal.label` | string (Measured, Estimated, Indicative, Provisional) | Value label. |
-| `presets.<preset>_haryana.local_normal.sentence` | string | Cautious wording for the badge. |
 
 ### manifest: `manifest.json`
 
@@ -496,7 +448,7 @@ M1, M2, M3 -> M6. Index of shipped files, hashes, provenance and shared lookups.
 
 | field | type | meaning |
 |---|---|---|
-| `schema_version` | const "1.0" | Contract version; bumped on any schema change. |
+| `schema_version` | const "1.1" | Contract version; bumped on any schema change. |
 | `generated_at` | string | UTC build time, ISO 8601. |
 | `mock` | boolean | true = synthetic mock data, never to be shown or quoted as real. |
 | `as_of` | string | Last day of data. |
@@ -534,13 +486,13 @@ M1, M2, M3 -> M6. Index of shipped files, hashes, provenance and shared lookups.
 
 M1 -> M4. Fetched only on download click; budgeted separately. Header:
 
-`satellite,date,time_utc,local_solar_time,lat,lon,frp,confidence,daynight,product`
+`satellite,date,time_utc,local_solar_time,lat,lon,frp,confidence,day_night,product`
 
 ## Pipeline hand-offs (`data/processed/`, git-ignored)
 
 ### tile_day: `tile_day.parquet`
 
-M1 -> M2, M3. Sparse: one row per region, res-6 tile, local solar date and sensor set with a clean hotspot. region is punjab, haryana or control. [verify: Parquet as the hand-off format]
+M1 -> M2, M3. Sparse: one row per region, res-6 tile, local solar date and sensor set with a clean DAY-pass hotspot (plan s2: day passes only for the headline). n_tile_day is 1 per row; MODIS_ALL is the union of Terra and Aqua flags, never a sum. region is punjab, haryana or control.
 
 | column | kind |
 |---|---|
@@ -564,4 +516,4 @@ M1 -> M3. [verify: M3 request, not in the plan] Every in-scope res-6 tile, inclu
 | `h3_r6` | str |
 | `zone_r3` | str |
 
-`sensor_set` values: TERRA, MODIS_ALL, VIIRS_SNPP, VIIRS_NOAA20, VIIRS_NOAA21 [verify names with M1]. `product` values: SP, NRT.
+`sensor_set` values: TERRA, MODIS_ALL, VIIRS_SNPP, VIIRS_NOAA20, VIIRS_NOAA21. `product` values: SP, NRT.

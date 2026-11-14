@@ -1,5 +1,5 @@
 """Stage A tests: the mock hand-offs and the tables built from them satisfy the contract
-and show the features the plan asks for. Run `make test-tables` (it builds first)."""
+and show the features the plan asks for. conftest.py builds a private mock tree first, so real data in the repo is never touched."""
 import json
 import shutil
 
@@ -42,7 +42,7 @@ def _mutated(tmp_path, name, fn):
 # ----------------------------------------------------------------- contract
 
 def test_everything_on_disk_passes_contract():
-    assert not {k: v for k, v in validate_tree().items() if v}
+    assert not {k: v for k, v in validate_tree(C.DATA_DIR, C.PROCESSED_DIR).items() if v}
 
 
 def test_every_contract_row_has_a_mock():
@@ -69,7 +69,7 @@ def test_extra_field_fails(tmp_path):
 
 
 def test_nested_extra_field_fails(tmp_path):
-    p = _mutated(tmp_path, "region_daily.json", lambda d: d["presets"]["punjab"].update(total_fires=[]))
+    p = _mutated(tmp_path, "region_daily.json", lambda d: d["presets"]["indian_punjab"].update(total_fires=[]))
     assert validate_file("region_daily", p)
 
 
@@ -85,7 +85,7 @@ def test_unequal_columns_fail(tmp_path):
 
 def test_zero_instead_of_null_viirs_fails(tmp_path):
     def zero(d):
-        d["presets"]["punjab"]["viirs_td"][0] = 0
+        d["presets"]["indian_punjab"]["viirs_td"][0] = 0
     p = _mutated(tmp_path, "region_daily.json", zero)
     assert any("never zero" in e for e in validate_file("region_daily", p))
 
@@ -98,7 +98,7 @@ def test_owner_cannot_review_own_check(tmp_path):
 @pytest.mark.parametrize("phrase", C.BANNED_PHRASES)
 def test_banned_phrase_fails(tmp_path, phrase):
     def poison(d):
-        d["presets"]["punjab"]["this_month"]["sentence"] += f" ({phrase})"
+        d["presets"]["indian_punjab"]["this_month"]["sentence"] += f" ({phrase})"
     p = _mutated(tmp_path, "narratives.json", poison)
     assert any("banned" in e for e in validate_file("narratives", p))
 
@@ -132,7 +132,7 @@ def test_three_presets_default_and_control():
     reg = {r["id"]: r for r in load("regions.json")["regions"]}
     assert [reg[i]["label"] for i in C.PRESET_IDS] == ["Indian Punjab", "Haryana", "Punjab + Haryana"]
     assert reg["punjab_haryana"]["default"] and reg["control"]["kind"] == "control"
-    assert reg["punjab_haryana"]["tiles_in_scope"]["r6"] == (reg["punjab"]["tiles_in_scope"]["r6"]
+    assert reg["punjab_haryana"]["tiles_in_scope"]["r6"] == (reg["indian_punjab"]["tiles_in_scope"]["r6"]
                                                              + reg["haryana"]["tiles_in_scope"]["r6"])
 
 

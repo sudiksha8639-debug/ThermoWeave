@@ -5,14 +5,17 @@ are unconfirmed in the plan itself or are M3 assumptions the plan does not state
 """
 from pathlib import Path
 
-# --- Schema (plan s5: frozen at H2 as 1.0) ---------------------------------
-SCHEMA_VERSION = "1.0"
+# --- Schema (plan s5: frozen at H2 as 1.0; 1.1 = Stage C, see CHANGELOG) ---------------------------------
+SCHEMA_VERSION = "1.1"
 
 # --- Paths (plan s5 repo layout) -------------------------------------------
 ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT / "web" / "public" / "data"        # shipped JSON
 CSV_DIR = DATA_DIR / "hotspots"                     # lazy hotspot CSVs, budgeted separately
-PROCESSED_DIR = ROOT / "data" / "processed"         # M1 hand-off (git-ignored)
+MOCK_PROCESSED_DIR = ROOT / "data" / "processed"            # where make_mocks writes
+REAL_PROCESSED_DIR = ROOT.parent / "data" / "processed"     # where M1's export writes (repo root)
+# Real hand-off wins when it exists; mocks never overwrite it.
+PROCESSED_DIR = REAL_PROCESSED_DIR if (REAL_PROCESSED_DIR / "tile_day.parquet").exists() else MOCK_PROCESSED_DIR
 DOCS_DIR = ROOT / "docs"
 
 # --- Grid (plan s2) ---------------------------------------------------------
@@ -39,7 +42,7 @@ MODIS_ONLY_INDICATIVE_AFTER = 2019                                   # plan s6 L
 PROVISIONAL_DAYS = 7           # [verify] "newest days Provisional" for a month in progress
 
 # --- Sensors and products (plan s2, s5) --------------------------------------
-SENSOR_SETS = ["TERRA", "MODIS_ALL", "VIIRS_SNPP", "VIIRS_NOAA20", "VIIRS_NOAA21"]   # [verify names with M1]
+SENSOR_SETS = ["TERRA", "MODIS_ALL", "VIIRS_SNPP", "VIIRS_NOAA20", "VIIRS_NOAA21"]   # confirmed with M1
 MODIS_SET = "MODIS_ALL"        # union of Terra and Aqua flags, never a sum
 SNPP_SET = "VIIRS_SNPP"
 RELAY_SET = "VIIRS_NOAA20"     # [verify] provisional relay guess; final choice at H8
@@ -48,7 +51,7 @@ PRODUCTS = ["SP", "NRT"]       # NRT is always Provisional
 
 # --- Regions (plan s2) -------------------------------------------------------
 PRESETS = [
-    {"id": "punjab", "label": "Indian Punjab", "sentence": "Indian Punjab", "parts": ["punjab"]},
+    {"id": "indian_punjab", "label": "Indian Punjab", "sentence": "Indian Punjab", "parts": ["punjab"]},
     {"id": "haryana", "label": "Haryana", "sentence": "Haryana", "parts": ["haryana"]},
     {"id": "punjab_haryana", "label": "Punjab + Haryana", "sentence": "Indian Punjab and Haryana",
      "parts": ["punjab", "haryana"]},
@@ -99,6 +102,13 @@ EXTERNAL_PRESET = "punjab_haryana"   # [verify] use "punjab" if the outside seri
 EXTERNAL_SOURCE = "[verify] MCD64A1 burned area or published Punjab farm-fire counts; chosen in prep by M6"
 EXTERNAL_LIMITS = "Only partly independent and may itself miss small crop fires."
 
+SENSOR_SET_ALIASES = {"SNPP": "VIIRS_SNPP", "N20": "VIIRS_NOAA20", "N21": "VIIRS_NOAA21"}   # M1's older names
+SUSPECT_GAP_IS_GAP = True        # [verify with M1] a day M1 flags suspect_gap is treated as no data
+MONTH_MEASURED_MIN_SHARE = 0.8   # [verify] a month is Measured if this share of its data days are VIIRS days
+USE_FALLBACK_CONVERSION = True   # True = M3 fits the plan's s6 conversion itself; False once M2 delivers
+CONVERSION_MIN_ACTUAL = 20       # zone-month-years with fewer VIIRS tile-days are left out of the tested error
+RELAY_SATELLITE_NAME = "NOAA-20"
+
 # --- Size / quantization (plan s5) --------------------------------------------
 SIZE_BUDGET_MB = 8.0
 PRECACHE_TILE_MONTH_YEARS = 5
@@ -119,4 +129,4 @@ INDEX_NOTE = "Relative burning activity at VIIRS scale. It is not fire size, bur
 
 # --- hotspots CSV (plan s5; owner M1) --------------------------------------------
 HOTSPOT_COLUMNS = ["satellite", "date", "time_utc", "local_solar_time", "lat", "lon", "frp",
-                   "confidence", "daynight", "product"]
+                   "confidence", "day_night", "product"]
