@@ -31,7 +31,8 @@ import { CsvPanel } from '../components/CsvPanel';
 import { InspectPanel } from '../components/InspectPanel';
 import { ThisMonthCard } from '../components/ThisMonthCard';
 import { LabelChip } from '../components/LabelChip';
-import { INK_DIM, LINE, viridis } from '../theme';
+import { Stat } from '../components/primitives';
+import { LINE, viridis } from '../theme';
 
 const NO_DATA_MSG = 'No data loaded here. Choose a preset or a loaded region.';
 // Res-6 payloads above this many tiles automatically fall back to res 5.
@@ -160,6 +161,7 @@ export function Workspace() {
     }
     setSelectedTiles(sel.size ? sel : null);
     setInspected(null);
+    setDrawPolygon(false);
     setPolyMsg(
       sel.size
         ? `${sel.size.toLocaleString()} tiles inside polygon ∩ ${region?.label ?? regionId}.`
@@ -228,6 +230,20 @@ export function Workspace() {
     return out;
   }, [rowsForYm, columns, valueCol]);
 
+  const monthStats = useMemo(() => {
+    let max = 0;
+    let sum = 0;
+    let n = 0;
+    for (const t of tilesWithData) {
+      if (t.value !== null) {
+        n += 1;
+        sum += t.value;
+        if (t.value > max) max = t.value;
+      }
+    }
+    return { max, mean: n ? sum / n : null };
+  }, [tilesWithData]);
+
   const loading = regionsQ.loading || geomQ.loading || filesLoading;
   const error = regionsQ.error || geomQ.error || filesError;
   const retryAll = () => {
@@ -237,11 +253,56 @@ export function Workspace() {
 
   return (
     <div className="space-y-4">
+      <header className="rise flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="section-label">Workspace</p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">Burn map</h1>
+          <p className="mt-1 max-w-xl text-[12.5px] leading-relaxed text-ink-dim">
+            One tile grid, one harmonized scale. Pick an area and period, then inspect a tile or
+            draw an area of interest.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-line/70 bg-surface/40 px-2.5 py-1 text-[11px] text-ink-dim">
+            <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-accent-2" />
+            {region?.label ?? regionId}
+          </span>
+          <span className="rounded-full border border-line/70 bg-surface/40 px-2.5 py-1 font-mono text-[11px] text-ink-dim">
+            {ymStr(startYm)} → {ymStr(endYm)}
+          </span>
+          <LabelChip label={regionTrust} />
+        </div>
+      </header>
+
       <AreaPicker />
 
+      {/* at-a-glance numbers for the month on the map */}
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+        <Stat
+          label="Month shown"
+          value={<span className="font-mono">{ymToLabel(clampedSelected)}</span>}
+          hint={`${SENSOR_MODE_LABEL[sensor]} scale`}
+        />
+        <Stat
+          label="Tiles with data"
+          value={tilesWithData.length.toLocaleString()}
+          hint={`of ${mapTiles.length.toLocaleString()} mapped`}
+        />
+        <Stat
+          label="Peak tile-days"
+          value={monthStats.max.toLocaleString()}
+          hint={monthStats.mean !== null ? `mean ${monthStats.mean.toFixed(1)}` : 'no values'}
+        />
+        <Stat
+          label="Selected tiles"
+          value={(selectedTiles?.size ?? 0).toLocaleString()}
+          hint={selectedTiles ? 'drag or polygon selection' : 'none selected'}
+        />
+      </div>
+
       {/* era banner */}
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-2 px-4 py-2">
-        <span className="text-xs font-semibold uppercase tracking-wider text-ink-dim">Era</span>
+      <div className="card flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5">
+        <span className="section-label">Era</span>
         {eraOverlap.map((e, i) => (
           <span key={`${e.id}-${i}`} className="flex items-center gap-2">
             <LabelChip label={e.trust} />
@@ -257,135 +318,208 @@ export function Workspace() {
       </div>
 
       {/* sensor mode + month + threshold + resolution */}
-      <div className="flex flex-wrap items-center gap-4 rounded-lg border border-line bg-surface-2 px-4 py-3">
-        <div role="radiogroup" aria-label="Sensor mode" className="flex gap-1">
-          {SENSOR_MODES.map((s) => (
-            <button
-              key={s.id}
-              role="radio"
-              aria-checked={sensor === s.id}
-              onClick={() => setSensor(s.id)}
-              className={`rounded px-3 py-1.5 text-sm ${
-                sensor === s.id
-                  ? 'bg-accent font-semibold text-surface'
-                  : 'border border-line text-ink-dim hover:text-ink'
-              }`}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-        <label className="flex items-center gap-2 text-xs text-ink-dim">
-          Month
-          <select
-            value={ymToLabel(clampedSelected)}
-            onChange={(e) => {
-              const [y, m] = e.target.value.split('-').map(Number);
-              setSelectedYm(y * 12 + m - 1);
-            }}
-            className="rounded border border-line bg-surface px-2 py-1 text-sm text-ink"
-          >
-            {monthOptions.map((ym) => (
-              <option key={ym} value={ymToLabel(ym)}>
-                {ymToLabel(ym)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-2 text-xs text-ink-dim">
-          Min tile-days
-          <input
-            type="range"
-            min={0}
-            max={20}
-            step={0.5}
-            value={minValue}
-            onChange={(e) => setMinValue(Number(e.target.value))}
-            className="w-28 accent-[#f0a03c]"
-          />
-          <span className="w-10 font-mono text-ink">{minValue}</span>
-        </label>
-        {res5Available && (
-          <div role="radiogroup" aria-label="Map resolution" className="flex items-center gap-1 text-xs text-ink-dim">
-            <span>Map resolution</span>
-            {([6, 5] as const).map((r) => (
-              <button
-                key={r}
-                role="radio"
-                aria-checked={mapRes === r}
-                onClick={() => setResPref(r)}
-                className={`rounded px-2 py-1 ${
-                  mapRes === r
-                    ? 'bg-line/70 font-semibold text-ink'
-                    : 'border border-line text-ink-dim hover:text-ink'
-                }`}
+      <section className="card p-3.5 sm:p-4">
+        <div className="flex flex-col gap-3.5 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+            <div>
+              <span className="field-label mb-1.5 block">Sensor mode</span>
+              <div role="radiogroup" aria-label="Sensor mode" className="seg">
+                {SENSOR_MODES.map((s) => (
+                  <button
+                    key={s.id}
+                    role="radio"
+                    aria-checked={sensor === s.id}
+                    onClick={() => setSensor(s.id)}
+                    className="seg-item"
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label htmlFor="map-month" className="field-label mb-1.5 block">
+                Month
+              </label>
+              <select
+                id="map-month"
+                value={ymToLabel(clampedSelected)}
+                onChange={(e) => {
+                  const [y, m] = e.target.value.split('-').map(Number);
+                  setSelectedYm(y * 12 + m - 1);
+                }}
+                className="control w-auto"
               >
-                res {r}
-                {r === 6 && autoFallback ? ' (auto→5)' : ''}
-              </button>
-            ))}
-            {autoFallback && (
-              <span className="text-[10px] text-amber-300">
-                auto: res-6 payload over budget ({res6Count.toLocaleString()} tiles)
-              </span>
+                {monthOptions.map((ym) => (
+                  <option key={ym} value={ymToLabel(ym)}>
+                    {ymToLabel(ym)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <span className="field-label mb-1.5 block">Min tile-days</span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  aria-label="Minimum tile-days"
+                  min={0}
+                  max={20}
+                  step={0.5}
+                  value={minValue}
+                  onChange={(e) => setMinValue(Number(e.target.value))}
+                  className="range w-28"
+                  style={{
+                    background: `linear-gradient(90deg, #f6a544 ${(minValue / 20) * 100}%, #2a3550 ${(minValue / 20) * 100}%)`,
+                  }}
+                />
+                <span className="min-w-9 rounded-md border border-line/70 bg-surface/50 px-1.5 py-0.5 text-center font-mono text-[11px] text-ink">
+                  {minValue}
+                </span>
+              </div>
+            </div>
+            {res5Available && (
+              <div>
+                <span className="field-label mb-1.5 block">Map resolution</span>
+                <div role="radiogroup" aria-label="Map resolution" className="seg">
+                  {([6, 5] as const).map((r) => (
+                    <button
+                      key={r}
+                      role="radio"
+                      aria-checked={mapRes === r}
+                      onClick={() => setResPref(r)}
+                      className="seg-item"
+                    >
+                      res {r}
+                      {r === 6 && autoFallback ? ' (auto→5)' : ''}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
-        )}
-        <button
-          onClick={() => {
-            setDrawPolygon((d) => !d);
-            if (drawPolygon) { setPolygon(null); setSelectedTiles(null); setPolyMsg(null); }
-          }}
-          aria-pressed={drawPolygon}
-          className={`rounded border px-2 py-1 text-xs ${
-            drawPolygon
-              ? 'border-accent-2 bg-accent-2/15 font-semibold text-accent-2'
-              : 'border-line text-ink-dim hover:text-ink'
-          }`}
-        >
-          {drawPolygon ? 'Finish polygon (dbl-click)' : 'Draw polygon'}
-        </button>
-        {selectedTiles && (
-          <button
-            onClick={() => { setSelectedTiles(null); setPolygon(null); setPolyMsg(null); }}
-            className="rounded border border-accent-2 px-2 py-1 text-xs text-accent-2"
-          >
-            Clear selection ({selectedTiles.size.toLocaleString()} tiles)
-          </button>
-        )}
-      </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <button
+              onClick={() => {
+                if (drawPolygon) {
+                  setDrawPolygon(false);
+                } else {
+                  setDrawPolygon(true);
+                  setPolygon(null);
+                  setSelectedTiles(null);
+                  setPolyMsg(null);
+                }
+              }}
+              aria-pressed={drawPolygon}
+              className={`btn btn-sm ${drawPolygon ? 'btn-primary' : 'btn-ghost'}`}
+            >
+              {drawPolygon ? 'Finish polygon (dbl-click)' : 'Draw polygon'}
+            </button>
+            {selectedTiles && (
+              <button
+                onClick={() => {
+                  setSelectedTiles(null);
+                  setPolygon(null);
+                  setPolyMsg(null);
+                }}
+                className="btn btn-ghost btn-sm text-accent-2"
+              >
+                Clear selection ({selectedTiles.size.toLocaleString()} tiles)
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-ink-dim">
+          <span>Tiles below the threshold are drawn as gaps. Missing data is never zero.</span>
+          {autoFallback && (
+            <span className="text-amber-300">
+              auto: res-6 payload over budget ({res6Count.toLocaleString()} tiles)
+            </span>
+          )}
+        </div>
+      </section>
 
       {error && (
-        <div className="flex items-center gap-3 rounded border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-200">
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
           <span>{error}</span>
-          <button
-            onClick={retryAll}
-            className="rounded border border-red-400/50 px-2 py-0.5 text-xs hover:bg-red-500/20"
-          >
+          <button onClick={retryAll} className="btn btn-ghost btn-sm">
             Retry
           </button>
         </div>
       )}
-      {loading && <p className="text-sm text-ink-dim">Loading tiles and monthly data…</p>}
       {polyMsg && <p className="text-sm text-accent-2">{polyMsg}</p>}
 
       {/* map + side panel */}
-      <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
-        <div className="h-[320px] overflow-hidden rounded-lg border border-line bg-surface-2 sm:h-[420px] lg:h-[560px]">
-          {!loading && !error && (
-            <HexMap
-              tiles={mapTiles}
-              tileMonth={monthFile}
-              columns={columns}
-              valueCol={valueCol}
-              selectedYm={clampedSelected}
-              minValue={minValue}
-              drawPolygon={drawPolygon}
-              polygonPoints={polygon}
-              onPolygonComplete={onPolygonComplete}
-            />
-          )}
-        </div>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <section className="card overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line/60 px-4 py-2.5">
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <h2 className="card-title">Burn map</h2>
+              <span className="font-mono text-[11px] text-ink-dim">
+                {ymToLabel(clampedSelected)} · res {mapRes}
+              </span>
+            </div>
+            <span className="text-[11px] text-ink-dim">
+              {tilesWithData.length.toLocaleString()} tiles with data
+              {selectedTiles ? ` · ${selectedTiles.size.toLocaleString()} selected` : ''}
+            </span>
+          </div>
+          <div className="relative h-[360px] sm:h-[460px] lg:h-[600px]">
+            {!loading && !error && (
+              <HexMap
+                tiles={mapTiles}
+                tileMonth={monthFile}
+                columns={columns}
+                valueCol={valueCol}
+                selectedYm={clampedSelected}
+                minValue={minValue}
+                drawPolygon={drawPolygon}
+                polygonPoints={polygon}
+                onPolygonComplete={onPolygonComplete}
+              />
+            )}
+            {loading && (
+              <div className="absolute inset-0 grid place-items-center text-sm text-ink-dim">
+                Loading tiles and monthly data…
+              </div>
+            )}
+            {!loading && !error && (
+              <div className="pointer-events-none absolute bottom-3 left-3 rounded-lg border border-line/70 bg-surface/85 px-2.5 py-2 text-[10px] text-ink-dim backdrop-blur">
+                <span className="mb-1 block font-semibold text-ink">tile-days</span>
+                <span
+                  className="inline-block h-2.5 w-36 rounded"
+                  style={{
+                    background: `linear-gradient(to right, ${[0, 0.25, 0.5, 0.75, 1]
+                      .map((t) => viridis(t))
+                      .join(', ')})`,
+                  }}
+                />
+                <span className="mt-0.5 flex justify-between">
+                  <span>0</span>
+                  <span>max</span>
+                </span>
+                <div className="mt-1.5 flex items-center gap-3">
+                  <span className="inline-flex items-center gap-1">
+                    <span
+                      aria-hidden="true"
+                      className="inline-block h-2 w-2 rounded-sm"
+                      style={{ background: '#3a4152' }}
+                    />
+                    zero
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <span
+                      aria-hidden="true"
+                      className="inline-block h-2 w-2 rounded-sm"
+                      style={{ background: '#20263a' }}
+                    />
+                    gap / filtered
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
         <div className="space-y-4">
           <InspectPanel
             target={inspected}
@@ -411,22 +545,14 @@ export function Workspace() {
         </div>
       </div>
 
-      {/* legend / summary — every number carries a label chip */}
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface-2 px-4 py-2 text-[11px] text-ink-dim">
-        <span>{SENSOR_MODE_LABEL[sensor]} tile-days</span>
+      {/* summary — every number carries a label chip */}
+      <div className="card flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5 text-[11px] text-ink-dim">
+        <span className="font-semibold text-ink">{SENSOR_MODE_LABEL[sensor]} tile-days</span>
         <LabelChip label={regionTrust} />
-        <span className="text-ink-dim">region trust · {ymToLabel(clampedSelected)}</span>
-        <span
-          className="inline-block h-2.5 w-40 rounded"
-          style={{
-            background: `linear-gradient(to right, ${[0, 0.25, 0.5, 0.75, 1].map((t) => viridis(t)).join(', ')})`,
-          }}
-        />
-        <span>0 → max</span>
-        <span className="ml-3 inline-block h-2.5 w-4 rounded" style={{ background: '#3a4152' }} />
-        <span>zero</span>
-        <span className="inline-block h-2.5 w-4 rounded" style={{ background: '#20263a' }} />
-        <span>gap / filtered</span>
+        <span>region trust · {ymToLabel(clampedSelected)}</span>
+        <span className="ml-auto font-mono">
+          {mapRes === 6 ? 'res 6' : 'res 5'} · {mapTiles.length.toLocaleString()} mapped
+        </span>
       </div>
 
       {/* text-table alternative for the map selection */}
@@ -469,13 +595,14 @@ export function Workspace() {
         selectedTiles={selectedTiles}
       />
 
-      <p className="text-xs text-ink-dim">
-        Relative burning activity at VIIRS scale — not fire size, burned area or
-        total fires. Numbers carry their label chip: Measured, Estimated,
-        Indicative or Provisional.
+      <p className="px-1 text-[11px] leading-relaxed text-ink-dim">
+        Relative burning activity at VIIRS scale — not fire size, burned area or total fires.
+        Numbers carry their label chip: Measured, Estimated, Indicative or Provisional.
       </p>
       {mapTiles.length === 0 && !loading && (
-        <p className="text-sm text-amber-300">{NO_DATA_MSG}</p>
+        <p className="rounded-xl border border-amber-400/30 bg-amber-400/[0.06] px-4 py-3 text-sm text-amber-200">
+          {NO_DATA_MSG}
+        </p>
       )}
     </div>
   );
@@ -500,21 +627,23 @@ function TileList({
 }) {
   void columns;
   return (
-    <section className="rounded-lg border border-line bg-surface-2 p-4 text-sm">
-      <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider" style={{ color: INK_DIM }}>
-        Tiles with data ({tiles.length.toLocaleString()})
-      </h2>
-      <label className="mb-1 block text-[11px]" style={{ color: INK_DIM }}>
+    <section className="card p-4 text-sm">
+      <header className="mb-1.5 flex items-baseline justify-between gap-2">
+        <h2 className="section-label">Tiles with data</h2>
+        <span className="font-mono text-[10.5px] text-ink-dim">{tiles.length.toLocaleString()}</span>
+      </header>
+      <label htmlFor="tile-select" className="mb-1 block text-[10.5px] text-ink-dim">
         Keyboard: focus the map and use arrow keys, or pick a tile here.
       </label>
       <select
+        id="tile-select"
         aria-label="Tile list for selected month"
         value={inspected ?? ''}
         onChange={(e) => {
           const v = Number(e.target.value);
           if (Number.isFinite(v)) onPick(v);
         }}
-        className="w-full rounded border border-line bg-surface px-2 py-1.5 text-xs text-ink"
+        className="control text-xs"
         size={1}
       >
         <option value="">— select a tile —</option>
@@ -529,7 +658,7 @@ function TileList({
         })}
       </select>
       {tiles.length > 500 && (
-        <p className="mt-1 text-[10px]" style={{ color: INK_DIM }}>
+        <p className="mt-1 text-[10px] text-ink-dim">
           Showing first 500 of {tiles.length.toLocaleString()} — use arrow keys on the map for the rest.
         </p>
       )}
@@ -571,12 +700,12 @@ function SelectionTable({
       };
     });
   return (
-    <details className="rounded-lg border border-line bg-surface-2 text-xs">
-      <summary className="cursor-pointer px-4 py-2 text-ink-dim hover:text-ink">
+    <details className="card overflow-hidden text-xs">
+      <summary className="cursor-pointer px-4 py-2.5 text-ink-dim transition hover:text-ink">
         Selection summary — {selectedTiles.size.toLocaleString()} tiles · {ymToLabel(ym)} (text alternative to the map)
       </summary>
       {
-        <div className="max-h-64 overflow-auto border-t border-line px-4 py-2">
+        <div className="max-h-64 overflow-auto border-t border-line/70 px-4 py-2">
           <table className="w-full">
             <thead>
               <tr className="text-left text-ink-dim">
@@ -623,9 +752,16 @@ function RegionCompare({
   endYm: number;
 }) {
   const presets = regions.filter((r) => r.kind === 'preset');
-  const [a, setA] = useState(presets[0]?.id ?? '');
-  const [b, setB] = useState(presets[1]?.id ?? presets[0]?.id ?? '');
+  const [aSel, setA] = useState<string | null>(null);
+  const [bSel, setB] = useState<string | null>(null);
   if (presets.length < 2) return null;
+
+  // Regions arrive asynchronously, so resolve the selections against the
+  // current list instead of freezing the initial (empty) value.
+  const a = presets.some((r) => r.id === aSel) ? (aSel as string) : presets[0].id;
+  const b = presets.some((r) => r.id === bSel)
+    ? (bSel as string)
+    : presets[1]?.id ?? presets[0].id;
 
   const from = `${ymStr(startYm)}-01`;
   const toYm = ymStr(endYm);
@@ -634,29 +770,31 @@ function RegionCompare({
   const labelOf = (id: string) => regions.find((r) => r.id === id)?.label ?? id;
 
   return (
-    <section className="rounded-lg border border-line bg-surface-2 p-4">
-      <div className="mb-2 flex flex-wrap items-center gap-3">
-        <h2 className="text-xs font-semibold uppercase tracking-wider" style={{ color: INK_DIM }}>
-          Compare regions (harmonized)
-        </h2>
-        {([['A', a, setA], ['B', b, setB]] as const).map(([tag, val, set]) => (
-          <label key={tag} className="flex items-center gap-1 text-xs text-ink-dim">
-            {tag}
-            <select
-              value={val}
-              onChange={(e) => set(e.target.value)}
-              className="rounded border border-line bg-surface px-2 py-1 text-xs text-ink"
-            >
-              {presets.map((r) => (
-                <option key={r.id} value={r.id}>{r.label}</option>
-              ))}
-            </select>
-          </label>
-        ))}
+    <section>
+      <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <h2 className="section-label">Compare regions (harmonized)</h2>
+        <div className="flex flex-wrap items-center gap-2">
+          {([['A', a, setA], ['B', b, setB]] as const).map(([tag, val, set]) => (
+            <label key={tag} className="flex items-center gap-1.5 text-[11px] text-ink-dim">
+              <span className="font-mono text-ink">{tag}</span>
+              <select
+                value={val}
+                onChange={(e) => set(e.target.value)}
+                className="control w-auto text-xs"
+              >
+                {presets.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+        </div>
       </div>
       <div className="grid gap-3 md:grid-cols-2">
-        <SeriesChartSlot rows={forRegion(a)} title={`${labelOf(a)} — harm tile-days`} />
-        <SeriesChartSlot rows={forRegion(b)} title={`${labelOf(b)} — harm tile-days`} />
+        <SeriesChartSlot rows={forRegion(a)} height={180} title={`${labelOf(a)} — harm tile-days`} />
+        <SeriesChartSlot rows={forRegion(b)} height={180} title={`${labelOf(b)} — harm tile-days`} />
       </div>
     </section>
   );
@@ -737,18 +875,22 @@ function GeoJsonUpload({
   };
 
   return (
-    <section className="rounded-lg border border-line bg-surface-2 p-4 text-xs">
-      <h2 className="mb-1 text-sm font-semibold uppercase tracking-wider text-ink-dim">Area tools</h2>
+    <section className="card p-4 text-xs">
+      <header className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="card-title">Area tools</h2>
+        <span className="text-[10.5px] text-ink-dim">GeoJSON · polygon · rectangle</span>
+      </header>
       <div className="flex flex-wrap items-center gap-2">
-        <label className="cursor-pointer rounded border border-line px-3 py-1.5 text-ink-dim hover:border-accent-2 hover:text-ink">
+        <label className="btn btn-ghost btn-sm cursor-pointer">
           Upload GeoJSON polygon
           <input type="file" accept=".geojson,.json,application/geo+json" className="hidden" onChange={onFile} />
         </label>
-        <span className="text-ink-dim">
-          Draw mode: click points on the map, double-click to close. Only tiles inside loaded regions count.
+        <span className="max-w-xl text-[10.5px] leading-relaxed text-ink-dim">
+          Draw mode: click points on the map, double-click to close. Only tiles inside loaded
+          regions count.
         </span>
       </div>
-      {msg && <p className="mt-1 text-amber-300">{msg}</p>}
+      {msg && <p className="mt-1.5 text-[11px] text-amber-300">{msg}</p>}
     </section>
   );
 }
@@ -762,23 +904,69 @@ export function ClimatologySlot({
   regionId: string;
 }) {
   const row = rows.find((r) => r.region === regionId && r.sensor === 'harm' && r.period === 5);
+  const pos = (v: number | null) => {
+    if (!row || v === null || row.p10 === null || row.p90 === null) return null;
+    const span = row.p90 - row.p10;
+    return span > 0 ? ((v - row.p10) / span) * 100 : 50;
+  };
+  const pcts: [string, number | null][] = row
+    ? [
+        ['p10', row.p10],
+        ['p25', row.p25],
+        ['p50', row.p50],
+        ['p75', row.p75],
+        ['p90', row.p90],
+      ]
+    : [];
   return (
-    <section className="rounded-lg border border-line bg-surface-2 p-4 text-sm">
-      <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider" style={{ color: INK_DIM }}>
-        Climatology (May, harm)
-      </h2>
+    <section className="card p-4 text-sm">
+      <header className="mb-2 flex items-baseline justify-between gap-2">
+        <h2 className="section-label">Climatology · May</h2>
+        <span className="text-[10px] text-ink-dim">harm scale</span>
+      </header>
       {row ? (
-        <div className="flex justify-between font-mono text-xs">
-          <span>p10 {row.p10}</span><span>p25 {row.p25}</span>
-          <span className="text-accent-2">p50 {row.p50}</span>
-          <span>p75 {row.p75}</span><span>p90 {row.p90}</span>
+        <div>
+          <div className="relative h-8">
+            <div className="absolute inset-x-0 top-3 h-2 rounded-full bg-surface-3" />
+            {pos(row.p10) !== null && pos(row.p90) !== null && (
+              <div
+                className="absolute top-3 h-2 rounded-full bg-accent-2/25"
+                style={{
+                  left: `${pos(row.p10)}%`,
+                  width: `${Math.max(0, (pos(row.p90) ?? 0) - (pos(row.p10) ?? 0))}%`,
+                }}
+              />
+            )}
+            {pos(row.p25) !== null && pos(row.p75) !== null && (
+              <div
+                className="absolute top-2 h-4 rounded bg-accent-2/45"
+                style={{
+                  left: `${pos(row.p25)}%`,
+                  width: `${Math.max(0, (pos(row.p75) ?? 0) - (pos(row.p25) ?? 0))}%`,
+                }}
+              />
+            )}
+            {pos(row.p50) !== null && (
+              <div
+                className="absolute top-1 h-6 w-0.5 -translate-x-1/2 rounded bg-ink"
+                style={{ left: `${pos(row.p50)}%` }}
+              />
+            )}
+          </div>
+          <div className="mt-1 grid grid-cols-5 gap-1 text-center font-mono text-[9.5px] text-ink-dim">
+            {pcts.map(([k, v]) => (
+              <span key={k} className={k === 'p50' ? 'text-ink' : undefined}>
+                {k}
+                <br />
+                {v ?? '—'}
+              </span>
+            ))}
+          </div>
         </div>
       ) : (
-        <p className="text-xs" style={{ color: INK_DIM }}>No climatology loaded.</p>
+        <p className="text-xs text-ink-dim">No climatology loaded.</p>
       )}
-      <p className="mt-1 text-[10px]" style={{ color: LINE }}>
-        Tile-day units · climatology baseline slot
-      </p>
+      <p className="mt-2 text-[10px] text-ink-dim">Tile-day units · baseline for May.</p>
     </section>
   );
 }
