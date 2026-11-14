@@ -7,3 +7,8 @@ dist/
 .DS_Store
 *.tsbuildinfo
 coverage/
+
+_pycache_/
+.pytest_cache/
+emberwise/data/raw/
+emberwise/data/processed/
