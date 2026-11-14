@@ -289,6 +289,14 @@ export function HexMap({
     };
   }, [draw]);
 
+  // Leaving draw mode always discards any unfinished draft.
+  useEffect(() => {
+    if (!drawPolygon) {
+      polyDraft.current = null;
+      setPolyScreen(null);
+    }
+  }, [drawPolygon]);
+
   const toLocal = (e: React.PointerEvent | React.MouseEvent) => {
     const r = canvasRef.current!.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
