@@ -72,7 +72,7 @@ function hexGrid(sizeKm, bboxKm) {
 const UNION = [73.8, 27.5, 77.5, 32.5];
 const bboxKm = [toXY(UNION[0], UNION[1])[0] - 8, toXY(UNION[0], UNION[1])[1] - 8, toXY(UNION[2], UNION[3])[0] + 8, toXY(UNION[2], UNION[3])[1] + 8];
 
-const RES6_SIZE = 4.6; // km — mock spacing (real res-6 ≈ 3.7 km)
+const RES6_SIZE = 3.6; // km — mock spacing (real res-6 ≈ 3.7 km)
 const res6 = hexGrid(RES6_SIZE, bboxKm);
 const res5 = hexGrid(10.5, bboxKm).map((c, i) => ({ ...c, res: 5, index: res6.length + i }));
 const tile_geometry = [...res6, ...res5];
@@ -86,6 +86,31 @@ for (const [id, p] of Object.entries(PRESETS)) {
   regionTiles[id] = res6.filter((t) => inBBox(t.cx, t.cy, p.bbox)).map((t) => t.index);
 }
 regionTiles.control_malwa = res6.filter((t) => inBBox(t.cx, t.cy, CONTROL.bbox)).map((t) => t.index);
+
+// res-5 membership per preset (centre inside preset bbox)
+const regionTiles5 = {};
+for (const [id, p] of Object.entries(PRESETS)) {
+  regionTiles5[id] = res5.filter((t) => inBBox(t.cx, t.cy, p.bbox)).map((t) => t.index);
+}
+
+// res6 tile -> parent res5 tile (res6 centre inside res5 hex), for aggregation
+function pointInPoly(lon, lat, verts) {
+  let inside = false;
+  for (let i = 0, j = verts.length - 1; i < verts.length; j = i++) {
+    const [xi, yi] = verts[i];
+    const [xj, yj] = verts[j];
+    if (yi > lat !== yj > lat && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+const res5Children = new Map(); // res5 index -> [res6 indices]
+for (const t5 of res5) {
+  const kids = [];
+  for (const t6 of res6) {
+    if (pointInPoly(t6.cx, t6.cy, t5.vertices)) kids.push(t6.index);
+  }
+  res5Children.set(t5.index, kids);
+}
 
 // ---------- tile_month (2019–2026) ----------
 const YEARS = [2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026];
@@ -133,6 +158,41 @@ for (const year of YEARS) {
       ]);
     }
   }
+  // res-5 rows: aggregate res-6 children (mean of available values per column)
+  {
+    const COLS_N = [2, 3, 4, 5, 6, 7, 8, 11]; // numeric columns to average
+    const byYm = new Map(); // ym -> Map<res6 index, row>
+    for (const r of rows) {
+      let m = byYm.get(r[1]);
+      if (!m) byYm.set(r[1], (m = new Map()));
+      m.set(r[0], r);
+    }
+    for (const t5 of res5) {
+      const kids = res5Children.get(t5.index) ?? [];
+      if (!kids.length) continue;
+      for (let mi = 0; mi < 12; mi++) {
+        const ym = year * 12 + mi;
+        const ymRows = byYm.get(ym);
+        if (!ymRows) continue;
+        const childRows = kids.map((k) => ymRows.get(k)).filter(Boolean);
+        if (!childRows.length) continue;
+        const mean = (ci) => {
+          const xs = childRows.map((r) => r[ci]).filter((v) => typeof v === 'number');
+          return xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null;
+        };
+        const harm5 = mean(6);
+        if (harm5 === null) continue;
+        if (harm5 < 1.2 && rnd() < 0.72) continue; // same gap rule as res 6
+        const first = childRows[0];
+        rows.push([
+          t5.index, ym,
+          mean(2), mean(3), mean(4), mean(5),
+          harm5, mean(7), mean(8),
+          first[9], first[10], mean(11),
+        ]);
+      }
+    }
+  }
   writeFileSync(join(out, `tile_month_${year}.json`), JSON.stringify({ year, columns: ['tile', 'ym', 'raw_hotspots', 'raw_tile_days', 'raw_modis', 'raw_viirs', 'harm', 'lo', 'hi', 'label', 'trust', 'frac_burning'], data: rows }));
   console.log(`tile_month_${year}.json: ${rows.length} rows`);
 }
@@ -140,10 +200,10 @@ for (const year of YEARS) {
 // ---------- regions ----------
 const regions = {
   regions: [
-    { id: 'indian_punjab', label: 'Indian Punjab', kind: 'preset', tiles_res: [6, 5], boundary_source: 'GADM 4.1 (mock)', bbox: PRESETS.indian_punjab.bbox, tiles_in_scope: { '5': regionTiles.indian_punjab.filter((i) => tile_geometry[i].res === 5), '6': regionTiles.indian_punjab.filter((i) => tile_geometry[i].res === 6) } },
-    { id: 'haryana', label: 'Haryana', kind: 'preset', tiles_res: [6, 5], boundary_source: 'GADM 4.1 (mock)', bbox: PRESETS.haryana.bbox, tiles_in_scope: { '5': regionTiles.haryana.filter((i) => tile_geometry[i].res === 5), '6': regionTiles.haryana.filter((i) => tile_geometry[i].res === 6) } },
-    { id: 'punjab_haryana', label: 'Punjab + Haryana', kind: 'preset', tiles_res: [6, 5], boundary_source: 'GADM 4.1 (mock)', bbox: PRESETS.punjab_haryana.bbox, tiles_in_scope: { '5': regionTiles.punjab_haryana.filter((i) => tile_geometry[i].res === 5), '6': regionTiles.punjab_haryana.filter((i) => tile_geometry[i].res === 6) } },
-    { id: 'control_malwa', label: CONTROL.label, kind: 'control', tiles_res: [6], boundary_source: 'user box (mock)', bbox: CONTROL.bbox, tiles_in_scope: { '6': regionTiles.control_malwa } },
+    { id: 'indian_punjab', label: 'Indian Punjab', kind: 'preset', tiles_res: [6, 5], boundary_source: 'GADM 4.1 (mock)', bbox: PRESETS.indian_punjab.bbox, tiles_in_scope: { '5': regionTiles5.indian_punjab, '6': regionTiles.indian_punjab } },
+    { id: 'haryana', label: 'Haryana', kind: 'preset', tiles_res: [6, 5], boundary_source: 'GADM 4.1 (mock)', bbox: PRESETS.haryana.bbox, tiles_in_scope: { '5': regionTiles5.haryana, '6': regionTiles.haryana } },
+    { id: 'punjab_haryana', label: 'Punjab + Haryana', kind: 'preset', tiles_res: [6, 5], boundary_source: 'GADM 4.1 (mock)', bbox: PRESETS.punjab_haryana.bbox, tiles_in_scope: { '5': regionTiles5.punjab_haryana, '6': regionTiles.punjab_haryana } },
+    { id: 'control_malwa', label: CONTROL.label, kind: 'control', tiles_res: [6, 5], boundary_source: 'user box (mock)', bbox: CONTROL.bbox, tiles_in_scope: { '5': res5.filter((t) => inBBox(t.cx, t.cy, CONTROL.bbox)).map((t) => t.index), '6': regionTiles.control_malwa } },
   ],
 };
 writeFileSync(join(out, 'regions.json'), JSON.stringify(regions));
