@@ -7,6 +7,11 @@ dist/
 .DS_Store
 *.tsbuildinfo
 coverage/
+
+.pytest_cache/
+emberwise/data/raw/
+emberwise/data/processed/
+
 # FIRMS data (large, not committed)
 data/raw/
 data/processed/
