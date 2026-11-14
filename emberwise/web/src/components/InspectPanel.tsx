@@ -32,9 +32,20 @@ export function InspectPanel({ target, rowsForYm, columns, geometry, valueCol, r
 
   if (!detail) {
     return (
-      <aside className="rounded-lg border border-line bg-surface-2 p-4 text-sm text-ink-dim">
-        Click a tile on the map to inspect it, or drag a rectangle to filter.
-        Use the tile list below the map for keyboard navigation.
+      <aside className="card p-4 text-sm">
+        <h2 className="section-label mb-2">Inspect</h2>
+        <div className="flex items-start gap-2.5 text-ink-dim">
+          <span aria-hidden="true" className="mt-0.5 text-accent-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="7" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M12 3v3M12 18v3M3 12h3M18 12h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </span>
+          <p className="text-[11.5px] leading-relaxed">
+            Click a tile on the map to inspect it, or drag a rectangle to filter. Use the tile
+            list below the map for keyboard navigation.
+          </p>
+        </div>
       </aside>
     );
   }
@@ -48,14 +59,19 @@ export function InspectPanel({ target, rowsForYm, columns, geometry, valueCol, r
   void valueCol;
 
   return (
-    <aside className="rounded-lg border border-line bg-surface-2 p-4 text-sm" aria-live="polite">
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-ink-dim">
-        Inspect
-      </h2>
-      {ym !== undefined && <p className="mb-1 text-ink">Month: {ymToLabel(ym)}</p>}
+    <aside className="card p-4 text-sm" aria-live="polite">
+      <header className="mb-2 flex items-center justify-between gap-2">
+        <h2 className="section-label">Inspect</h2>
+        {target?.tile !== undefined && (
+          <span className="rounded border border-line/80 bg-surface/50 px-1.5 py-0.5 font-mono text-[10px] text-ink-dim">
+            tile {target.tile}
+          </span>
+        )}
+      </header>
+      {ym !== undefined && <p className="text-sm text-ink">{ymToLabel(ym)}</p>}
       {g && (
-        <p className="mb-2 text-xs text-ink-dim">
-          Tile centre {g.cy.toFixed(4)}°N, {g.cx.toFixed(4)}°E · res {g.res}
+        <p className="mb-2 mt-0.5 font-mono text-[10.5px] text-ink-dim">
+          {g.cy.toFixed(4)}°N, {g.cx.toFixed(4)}°E · res {g.res}
         </p>
       )}
       <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-ink-dim">
@@ -71,7 +87,7 @@ export function InspectPanel({ target, rowsForYm, columns, geometry, valueCol, r
         )}
       </div>
       {!row && (
-        <p className="text-ink-dim">
+        <p className="text-[11.5px] text-ink-dim">
           No observation for this tile-month — a data gap, not zero.
         </p>
       )}
@@ -79,28 +95,34 @@ export function InspectPanel({ target, rowsForYm, columns, geometry, valueCol, r
         <table className="w-full text-xs">
           <thead>
             <tr className="text-left text-ink-dim">
-              <th className="py-0.5">Sensor mode</th>
-              <th className="py-0.5 text-right">Value</th>
+              <th className="pb-1 font-medium">Sensor mode</th>
+              <th className="pb-1 text-right font-medium">Value</th>
             </tr>
           </thead>
           <tbody>
-            {SENSOR_MODES.map((s) => (
-              <tr key={s.id} className={s.column === valueCol ? 'font-semibold text-ink' : 'text-ink-dim'}>
-                <td className="py-0.5">{s.label}</td>
-                <td className="py-0.5 text-right">
-                  {tmNum(row, columns, s.column) ?? '—'}
-                  <span className="ml-1 text-[9px] uppercase text-ink-dim">tile-days</span>
-                </td>
-              </tr>
-            ))}
+            {SENSOR_MODES.map((s) => {
+              const active = s.column === valueCol;
+              return (
+                <tr
+                  key={s.id}
+                  className={active ? 'bg-accent-2/[0.07] text-ink' : 'text-ink-dim'}
+                >
+                  <td className={`py-1 ${active ? 'pl-1.5 font-semibold' : ''}`}>{s.label}</td>
+                  <td className="py-1 pr-1.5 text-right font-mono">
+                    {tmNum(row, columns, s.column) ?? '—'}
+                    <span className="ml-1 text-[9px] uppercase text-ink-dim">tile-days</span>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}
       {row && (
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-dim">
+        <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-line/60 pt-2 text-xs text-ink-dim">
           {lo !== null && hi !== null && (
-            <span>
-              lo–hi: {lo} – {hi} tile-days
+            <span className="font-mono text-[10.5px]">
+              lo–hi {lo}–{hi}
             </span>
           )}
           <SaturationFlag fracBuring={frac} />
