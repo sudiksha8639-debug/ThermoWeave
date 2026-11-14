@@ -8,6 +8,9 @@ export interface Manifest {
   boundary_licence?: string;
   ai_use_note?: string;
   precache?: string[];
+  /** Optional era boundaries shipped with the real manifest. Shape is
+   *  normalised by erasFromManifest(); falls back to ERAS when absent. */
+  eras?: unknown;
   [k: string]: unknown;
 }
 
@@ -199,21 +202,111 @@ export const ERAS: Era[] = [
   },
 ];
 
-export function eraForMonth(ym: number): Era {
+// ---------- era boundaries ----------
+// Era bounds may be 'YYYY-MM' or 'YYYY-MM-DD'. A 'YYYY-MM' start means the
+// first of that month; a 'YYYY-MM' end means the last day of that month.
+// '' end = open.
+
+export interface EraBound {
+  y: number;
+  m: number; // 1-12
+  d: number;
+}
+
+export function parseEraBound(s: string, isEnd: boolean): EraBound | null {
+  const m = /^(\d{4})-(\d{2})(?:-(\d{2}))?$/.exec(s.trim());
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  if (mo < 1 || mo > 12) return null;
+  if (m[3]) {
+    const d = Number(m[3]);
+    if (d < 1 || d > 31) return null;
+    return { y, m: mo, d };
+  }
+  // month precision
+  if (isEnd) {
+    const last = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+    return { y, m: mo, d: last };
+  }
+  return { y, m: mo, d: 1 };
+}
+
+function boundToTime(b: EraBound): number {
+  return Date.UTC(b.y, b.m - 1, b.d);
+}
+
+const TRUST_LABELS: TrustLabel[] = ['Measured', 'Estimated', 'Indicative', 'Provisional'];
+
+/**
+ * Normalise era boundaries shipped in the manifest. Accepts
+ *   eras: [{id?, name?, start, end, trust, note?}, ...]
+ * Returns null when absent or unusable — callers fall back to ERAS.
+ */
+export function erasFromManifest(m: Manifest | null | undefined): Era[] | null {
+  const raw = m?.eras;
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const out: Era[] = [];
+  for (const [i, e] of raw.entries()) {
+    if (typeof e !== 'object' || e === null) return null;
+    const r = e as Record<string, unknown>;
+    const start = typeof r.start === 'string' ? parseEraBound(r.start, false) : null;
+    if (!start) return null;
+    const endStr = typeof r.end === 'string' ? r.end : '';
+    const end = endStr === '' ? null : parseEraBound(endStr, true);
+    if (endStr !== '' && !end) return null;
+    const trust =
+      typeof r.trust === 'string' && TRUST_LABELS.includes(r.trust as TrustLabel)
+        ? (r.trust as TrustLabel)
+        : 'Estimated';
+    out.push({
+      id: (['A', 'B', 'C', 'D'] as const)[Math.min(i, 3)],
+      name: typeof r.name === 'string' ? r.name : `Era ${String.fromCharCode(65 + i)}`,
+      start: r.start as string,
+      end: endStr,
+      trust,
+      note: typeof r.note === 'string' ? r.note : '',
+    });
+  }
+  // must be chronological
+  const times = out.map((e) => boundToTime(parseEraBound(e.start, false)!));
+  for (let i = 1; i < times.length; i++) if (times[i] < times[i - 1]) return null;
+  return out;
+}
+
+/** Era containing a YYYY-MM month (uses the first day of the month). */
+export function eraForYm(ym: number, eras: Era[] = ERAS): Era {
   const y = Math.floor(ym / 12);
-  const m = ym % 12; // 0-based
-  const idx = ERAS.findIndex((e) => {
-    const [sy, sm] = e.start.split('-').map(Number);
-    const sYm = sy * 12 + (sm - 1);
-    if (ym < sYm) return false;
+  const m = (ym % 12) + 1;
+  const t = Date.UTC(y, m - 1, 1);
+  const hit = eras.find((e) => {
+    const s = parseEraBound(e.start, false);
+    if (!s || t < boundToTime(s)) return false;
     if (e.end === '') return true;
-    const [ey, em] = e.end.split('-').map(Number);
-    const eYm = ey * 12 + (em - 1);
-    return ym <= eYm;
+    const en = parseEraBound(e.end, true);
+    return en !== null && t <= boundToTime(en);
   });
-  void y;
-  void m;
-  return ERAS[Math.max(0, idx)];
+  return hit ?? eras[eras.length - 1] ?? ERAS[0];
+}
+
+/** Era containing an ISO date (YYYY-MM-DD or YYYY-MM). */
+export function eraForDate(date: string, eras: Era[] = ERAS): Era {
+  const p = parseEraBound(date, false);
+  if (!p) return eras[0] ?? ERAS[0];
+  const t = boundToTime(p);
+  const hit = eras.find((e) => {
+    const s = parseEraBound(e.start, false);
+    if (!s || t < boundToTime(s)) return false;
+    if (e.end === '') return true;
+    const en = parseEraBound(e.end, true);
+    return en !== null && t <= boundToTime(en);
+  });
+  return hit ?? eras[eras.length - 1] ?? ERAS[0];
+}
+
+/** @deprecated use eraForYm */
+export function eraForMonth(ym: number): Era {
+  return eraForYm(ym);
 }
 
 export function ymToLabel(ym: number): string {
