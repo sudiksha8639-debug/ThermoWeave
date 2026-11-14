@@ -123,6 +123,10 @@ summary:focus-visible,
   color: var(--color-ink);
 }
 
+.card-title-lg {
+  font-size: 1rem;
+}
+
 .hairline {
   border-top: 1px solid color-mix(in srgb, var(--color-line) 70%, transparent);
 }

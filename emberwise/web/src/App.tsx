@@ -16,31 +16,56 @@ function Brand({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="group flex items-center gap-2.5 rounded-lg pr-1 text-left"
+      className="group flex items-center gap-2.5 rounded-xl pr-1 text-left"
       aria-label="EMBERWISE home"
     >
-      <span className="relative grid h-9 w-9 place-items-center">
+      <span className="relative grid h-10 w-10 place-items-center">
         <span
           aria-hidden="true"
-          className="absolute inset-0 rounded-full bg-accent/25 blur-md transition group-hover:bg-accent/35"
+          className="absolute inset-0 rounded-full bg-accent/25 blur-md transition group-hover:bg-accent/40"
         />
-        <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true" className="relative">
+        <svg width="32" height="32" viewBox="0 0 40 40" aria-hidden="true" className="relative">
           <defs>
-            <linearGradient id="brand-hex" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stopColor="#ffbd68" />
+            <linearGradient id="brand-tile" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stopColor="#1a2540" />
+              <stop offset="0.55" stopColor="#101a30" />
+              <stop offset="1" stopColor="#0a1120" />
+            </linearGradient>
+            <linearGradient id="brand-edge" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stopColor="#ffc878" />
+              <stop offset="0.6" stopColor="#f6a544" />
+              <stop offset="1" stopColor="#5ee0d0" />
+            </linearGradient>
+            <linearGradient id="brand-flame" x1="0.5" y1="0" x2="0.5" y2="1">
+              <stop offset="0" stopColor="#ffe2ab" />
+              <stop offset="0.5" stopColor="#ffbd68" />
               <stop offset="1" stopColor="#ef8a2a" />
             </linearGradient>
           </defs>
-          <polygon points="16,2 30,9 30,23 16,30 2,23 2,9" fill="url(#brand-hex)" />
-          <path
-            d="M16 8.2c2.5 2.3 4.2 4.4 4.2 7.1 0 2.5-1.9 4.6-4.2 4.6s-4.2-2.1-4.2-4.6c0-2.7 1.7-4.8 4.2-7.1z"
-            fill="#0b1020"
-            opacity="0.82"
+          <rect
+            x="1"
+            y="1"
+            width="38"
+            height="38"
+            rx="12"
+            fill="url(#brand-tile)"
+            stroke="url(#brand-edge)"
+            strokeWidth="1.5"
           />
+          <path
+            d="M20 8.8c4.4 3.8 7.2 7.5 7.2 11.8 0 4.4-3.2 7.9-7.2 7.9s-7.2-3.5-7.2-7.9c0-4.3 2.8-8 7.2-11.8z"
+            fill="url(#brand-flame)"
+          />
+          <circle cx="27.4" cy="12.6" r="1.5" fill="#7deade" />
         </svg>
       </span>
       <span className="leading-tight">
-        <span className="block text-[15px] font-bold tracking-[0.02em]">EMBERWISE</span>
+        <span className="block text-[16px] font-bold tracking-[0.02em]">
+          EMBER
+          <span className="bg-gradient-to-r from-[#ffc878] to-[#ef8a2a] bg-clip-text text-transparent">
+            WISE
+          </span>
+        </span>
         <span className="hidden text-[10px] font-medium uppercase tracking-[0.18em] text-ink-dim sm:block">
           Harmonized fire record
         </span>
