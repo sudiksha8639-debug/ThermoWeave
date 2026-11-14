@@ -108,7 +108,11 @@ const cache = new Map<string, Promise<unknown>>();
 async function fetchText(name: string, ext: string): Promise<string> {
   const res = await fetch(`${import.meta.env.BASE_URL}data/${name}.${ext}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.text();
+  const text = await res.text();
+  // Static hosts (and the Vite dev server) answer unknown paths with
+  // index.html — treat an HTML body as "file missing".
+  if (text.trimStart().startsWith('<')) throw new Error('not found (HTML response)');
+  return text;
 }
 
 async function fetchJsonRaw(name: string): Promise<unknown> {

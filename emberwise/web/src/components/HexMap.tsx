@@ -86,7 +86,7 @@ export function HexMap({
   const [polyScreen, setPolyScreen] = useState<[number, number][] | null>(null);
   const rafRef = useRef<number | null>(null);
   const frameEma = useRef<number | null>(null);
-  const lastLog = useRef(0);
+  const lastLog = useRef(-Infinity);
   const { selectedTiles, setSelectedTiles, setInspected, sensor, inspected } = useApp();
 
   // month rows keyed by tile index for the selected month

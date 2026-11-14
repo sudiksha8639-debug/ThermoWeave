@@ -43,7 +43,7 @@ export function AreaPicker() {
 
 function AreaPickerBody() {
   const { regionId, setRegionId, startYm, endYm, setRange } = useApp();
-  const { data, loading, error } = useData(loadRegions, []);
+  const { data, loading, error, retry } = useData(loadRegions, []);
   const regions = data?.regions ?? [];
   const region: Region | undefined = regions.find((r) => r.id === regionId);
 
@@ -85,7 +85,17 @@ function AreaPickerBody() {
         Area &amp; period
       </h2>
       {loading && <p className="text-sm text-ink-dim">Loading regions…</p>}
-      {error && <p className="text-sm text-red-300">{error}</p>}
+      {error && (
+        <p className="flex items-center gap-2 text-sm text-red-300">
+          <span>{error}</span>
+          <button
+            onClick={retry}
+            className="rounded border border-red-400/50 px-1.5 py-0.5 text-[10px] hover:bg-red-500/20"
+          >
+            Retry
+          </button>
+        </p>
+      )}
 
       <div className="grid gap-4 md:grid-cols-3">
         <div>

@@ -16,6 +16,7 @@ function rnd() {
   return seed / 4294967296;
 }
 const rand = (a, b) => a + rnd() * (b - a);
+const SV = { schema_version: '1.0' };
 const pick = (arr) => arr[Math.floor(rnd() * arr.length)];
 
 // ---------- presets ----------
@@ -193,7 +194,7 @@ for (const year of YEARS) {
       }
     }
   }
-  writeFileSync(join(out, `tile_month_${year}.json`), JSON.stringify({ year, columns: ['tile', 'ym', 'raw_hotspots', 'raw_tile_days', 'raw_modis', 'raw_viirs', 'harm', 'lo', 'hi', 'label', 'trust', 'frac_burning'], data: rows }));
+  writeFileSync(join(out, `tile_month_${year}.json`), JSON.stringify({ ...SV, year, columns: ['tile', 'ym', 'raw_hotspots', 'raw_tile_days', 'raw_modis', 'raw_viirs', 'harm', 'lo', 'hi', 'label', 'trust', 'frac_burning'], data: rows }));
   console.log(`tile_month_${year}.json: ${rows.length} rows`);
 }
 
@@ -206,7 +207,7 @@ const regions = {
     { id: 'control_malwa', label: CONTROL.label, kind: 'control', tiles_res: [6, 5], boundary_source: 'user box (mock)', bbox: CONTROL.bbox, tiles_in_scope: { '5': res5.filter((t) => inBBox(t.cx, t.cy, CONTROL.bbox)).map((t) => t.index), '6': regionTiles.control_malwa } },
   ],
 };
-writeFileSync(join(out, 'regions.json'), JSON.stringify(regions));
+writeFileSync(join(out, 'regions.json'), JSON.stringify({ ...SV, ...regions }));
 
 // ---------- region_daily (daily, 3 presets; sample 2023 + 2024 + 2025 + 2026-to-date) ----------
 const daily = { rows: [] };
@@ -232,7 +233,7 @@ for (const pid of Object.keys(PRESETS)) {
     });
   }
 }
-writeFileSync(join(out, 'region_daily.json'), JSON.stringify(daily));
+writeFileSync(join(out, 'region_daily.json'), JSON.stringify({ ...SV, ...daily }));
 console.log(`region_daily.json: ${daily.rows.length} rows`);
 
 // ---------- climatology ----------
@@ -255,7 +256,7 @@ for (const pid of Object.keys(PRESETS)) {
     }
   }
 }
-writeFileSync(join(out, 'climatology.json'), JSON.stringify(clim));
+writeFileSync(join(out, 'climatology.json'), JSON.stringify({ ...SV, ...clim }));
 
 // ---------- coverage (daily 2019-2026) ----------
 const cov = { rows: [] };
@@ -270,11 +271,12 @@ const cov = { rows: [] };
     d += 86400000;
   }
 }
-writeFileSync(join(out, 'coverage.json'), JSON.stringify(cov));
+writeFileSync(join(out, 'coverage.json'), JSON.stringify({ ...SV, ...cov }));
 console.log(`coverage.json: ${cov.rows.length} rows`);
 
 // ---------- periods / narratives ----------
 writeFileSync(join(out, 'periods.json'), JSON.stringify({
+  ...SV,
   periods: [
     { start: '2019-04-01', end: '2019-05-15', severity: 'high', firm: true, sentence: 'Pre-monsoon burning in the Malwa belt ran well above the 2001–2020 median for six weeks.' },
     { start: '2020-10-20', end: '2020-11-10', severity: 'extreme', firm: true, sentence: 'Post-monsoon peak coincided with stubble-burning pressure; tile-days reached the top decile of the record.' },
@@ -287,25 +289,30 @@ writeFileSync(join(out, 'periods.json'), JSON.stringify({
 
 // ---------- small lab files ----------
 writeFileSync(join(out, 'validation.json'), JSON.stringify({
+  ...SV,
   summary: 'Mock validation summary. Real file compares harmonized tile-days against held-out VIIRS weeks.',
   metrics: { mae_tile_days: 1.8, within_band_pct: 82, n_weeks: 312 },
 }));
 writeFileSync(join(out, 'relay_sim.json'), JSON.stringify({
+  ...SV,
   summary: 'Mock relay-satellite simulation. Real file models the new overpass geometry.',
   points: Array.from({ length: 24 }, (_, h) => ({ hour_utc: h, rel_visits: Math.round(2 + 3 * Math.sin((h / 24) * Math.PI * 2) ** 2) })),
 }));
 writeFileSync(join(out, 'conversion.json'), JSON.stringify({
+  ...SV,
   summary: 'Mock MODIS→VIIRS conversion factors by month and confidence class.',
   rows: Array.from({ length: 12 }, (_, m) => ({ month: m + 1, factor: +(0.8 + 0.4 * season(m)).toFixed(3) })),
 }));
 writeFileSync(join(out, 'drift.json'), JSONSelectorSafe());
 function JSONSelectorSafe() {
   return JSON.stringify({
+    ...SV,
     summary: 'Mock observing-time drift diagnostic for the Fire Clock Dial.',
     rows: Array.from({ length: 96 }, (_, i) => ({ ym: 2019 * 12 + i, median_local_hour: +(5.5 + 2.2 * Math.sin(i / 9)).toFixed(2) })),
   });
 }
 writeFileSync(join(out, 'hourly.json'), JSON.stringify({
+  ...SV,
   summary: 'Mock hourly hotspot distribution by local solar hour.',
   rows: Array.from({ length: 24 }, (_, h) => ({ local_hour: h, hotspots: Math.round(40 + 260 * Math.exp(-Math.pow((h - 13.5) / 3.2, 2)) + 30 * Math.exp(-Math.pow((h - 2.5) / 1.6, 2))) })),
 }));
@@ -336,7 +343,7 @@ for (const [pid, p] of Object.entries(PRESETS)) {
 console.log('hotspots CSVs written');
 
 // ---------- tile_geometry ----------
-writeFileSync(join(out, 'tile_geometry.json'), JSON.stringify({ tile_geometry }));
+writeFileSync(join(out, 'tile_geometry.json'), JSON.stringify({ ...SV, tile_geometry }));
 console.log(`tile_geometry.json: ${tile_geometry.length} tiles (${res6.length} res6, ${res5.length} res5)`);
 
 // ---------- manifest ----------

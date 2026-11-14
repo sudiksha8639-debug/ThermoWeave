@@ -35,7 +35,7 @@ import { INK_DIM, LINE, viridis } from '../theme';
 
 const NO_DATA_MSG = 'No data loaded here. Choose a preset or a loaded region.';
 // Res-6 payloads above this many tiles automatically fall back to res 5.
-const RES6_BUDGET = 6000;
+const RES6_BUDGET = 5500;
 
 export function Workspace() {
   const {
@@ -312,15 +312,16 @@ export function Workspace() {
               <button
                 key={r}
                 role="radio"
-                aria-checked={mapRes === r && resPref === r}
+                aria-checked={mapRes === r}
                 onClick={() => setResPref(r)}
                 className={`rounded px-2 py-1 ${
-                  resPref === r
+                  mapRes === r
                     ? 'bg-line/70 font-semibold text-ink'
                     : 'border border-line text-ink-dim hover:text-ink'
                 }`}
               >
                 res {r}
+                {r === 6 && autoFallback ? ' (auto→5)' : ''}
               </button>
             ))}
             {autoFallback && (
