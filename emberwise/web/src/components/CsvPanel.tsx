@@ -87,13 +87,16 @@ export function CsvPanel({ region, files, geometry, columns, startYm, endYm, sel
   };
 
   return (
-    <section aria-label="CSV downloads" className="rounded-lg border border-line bg-surface-2 p-4">
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wider text-ink-dim">Export CSV</h2>
+    <section aria-label="CSV downloads" className="card p-4">
+      <header className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="card-title">Export CSV</h2>
+        <span className="text-[11px] text-ink-dim">tile aggregates · hotspot detections</span>
+      </header>
       <div className="flex flex-wrap items-center gap-2">
         <button
           onClick={downloadMonthly}
           disabled={monthlyRows.length === 0}
-          className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-surface disabled:opacity-40"
+          className="btn btn-primary btn-sm"
         >
           Monthly tile rows ({monthlyRows.length.toLocaleString()})
         </button>
@@ -103,7 +106,7 @@ export function CsvPanel({ region, files, geometry, columns, startYm, endYm, sel
               key={y}
               onClick={() => downloadHotspots(y)}
               disabled={busy !== null}
-              className="rounded border border-line px-3 py-1.5 text-sm text-ink hover:border-accent-2 disabled:opacity-40"
+              className="btn btn-ghost btn-sm"
             >
               {busy === String(y) ? 'Loading…' : `Hotspots ${y}`}
             </button>
@@ -114,13 +117,13 @@ export function CsvPanel({ region, files, geometry, columns, startYm, endYm, sel
           </span>
         )}
       </div>
-      <p className="mt-2 text-[11px] leading-snug text-ink-dim">
+      <p className="mt-2.5 text-[10.5px] leading-relaxed text-ink-dim">
         Monthly tile rows are H3 tile aggregates for the selected range
         {selectedTiles ? ' and drag-selected tiles' : ''}. Hotspot files are
         per-preset, per-year point detections at native satellite resolution —
         fetched only when you click.
       </p>
-      {msg && <p className="mt-1 text-xs text-accent-2">{msg}</p>}
+      {msg && <p className="mt-1.5 text-[11px] text-accent-2">{msg}</p>}
     </section>
   );
 }

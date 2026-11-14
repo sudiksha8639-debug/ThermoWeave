@@ -54,7 +54,7 @@ export function DataSourcesPanel() {
 
   return (
     <details
-      className="rounded-lg border border-line bg-surface-2 text-xs"
+      className="card overflow-hidden text-xs"
       onToggle={(e) => {
         // Probe lazily: only when the drawer is opened, so the Story screen
         // does not eagerly parse every tile_month file.
@@ -65,14 +65,14 @@ export function DataSourcesPanel() {
       }}
     >
       <summary
-        className="cursor-pointer select-none px-3 py-2 font-medium text-ink-dim hover:text-ink"
+        className="flex cursor-pointer select-none items-center gap-2 px-3.5 py-2.5 font-medium text-ink-dim transition hover:text-ink"
         style={{ color: INK_DIM }}
       >
         Data sources ({statuses.filter((s) => s.source === 'repo').length} repo /{' '}
         {statuses.filter((s) => s.source === 'mock').length} mock
         {statuses.some((s) => s.error) ? ` / ${statuses.filter((s) => s.error).length} error` : ''})
       </summary>
-      <div className="border-t border-line px-3 py-2">
+      <div className="border-t border-line/70 px-3.5 py-3">
         <p className="mb-2 text-[11px] leading-snug" style={{ color: INK_DIM }}>
           Each file is tried from the repo (<code>mock-data/</code> →{' '}
           <code>public/data/</code>) first; missing or schema-only files fall
@@ -110,7 +110,7 @@ export function DataSourcesPanel() {
             resetDataCache();
             probeAll();
           }}
-          className="mt-2 rounded border border-line px-2 py-1 text-[11px] text-ink-dim hover:border-accent-2 hover:text-ink"
+          className="btn btn-ghost btn-sm mt-2"
         >
           Re-check sources
         </button>
