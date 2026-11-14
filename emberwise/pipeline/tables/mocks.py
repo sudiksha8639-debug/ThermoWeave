@@ -19,7 +19,7 @@ import numpy as np
 import polars as pl
 
 from . import config as C
-from .jsonio import envelope, qlist, write_json
+from .jsonio import envelope, qlist, read_json, write_json
 from .timeutil import day_index, index_day, parse
 
 SEED = 20261114
@@ -129,7 +129,7 @@ def build_tile_day(tiles: pl.DataFrame, as_of: str) -> pl.DataFrame:
     ti, dd, ss, hs = [], [], [], []
     for year in range(parse(C.EPOCH).year, a.year + 1):
         sim = simulate_year(year, amp, a)
-        for sset in ("TERRA", "MODIS_ALL", "VIIRS_SNPP", "VIIRS_NOAA20"):
+        for sset in ("TERRA", "MODIS_ALL", C.SNPP_SET, C.RELAY_SET):
             t, d = np.nonzero(sim[sset])
             ti.append(t); dd.append(sim["days"][d]); hs.append(sim[sset][t, d])
             ss.append(np.full(len(t), C.SENSOR_SETS.index(sset)))
@@ -238,9 +238,11 @@ def validation_json(cube: dict) -> dict:
         out[name] = pending(name, None)
     out["baselines"] = pending("baselines", {"metric": "mean absolute percent error", "n": 0,
                                              "per_zone_month": None, "global_ratio": None,
-                                             "no_conversion": None, "beats_both": None})
+                                             "no_conversion": None, "beats_both": None,
+                                           "zone_month_level": None})
     out["rank_test"] = pending("rank_test", {"method": "within calendar month, across years", "rho": None,
-                                             "threshold": C.RANK_PASS, "passed": None, "n": 0})
+                                             "threshold": C.RANK_PASS, "passed": None, "n": 0,
+                                             "other_method": None})
     out["external_check"] = pending("external_check", {
         "source": "[verify] MCD64A1 burned area or published Punjab farm-fire counts; chosen in prep by M6",
         "source_limits": "Only partly independent and may itself miss small crop fires.",
@@ -283,7 +285,7 @@ def coverage_json(as_of: str) -> dict:
                  (s, "NRT", nrt, end, True)]
     runs += [(C.SNPP_SET, "SP", day_index(C.VIIRS_START), nrt - 1, True),
              (C.SNPP_SET, "NRT", nrt, day_index(C.SNPP_END), True),
-             ("VIIRS_NOAA20", "SP", day_index(NOAA20_START), nrt - 1, True), ("VIIRS_NOAA20", "NRT", nrt, end, True)]
+             (C.RELAY_SET, "SP", day_index(NOAA20_START), nrt - 1, True), (C.RELAY_SET, "NRT", nrt, end, True)]
     cols = {"sensor_set": [C.SENSOR_SETS.index(r[0]) for r in runs],
             "product": [C.PRODUCTS.index(r[1]) for r in runs],
             "start": [r[2] for r in runs], "end": [r[3] for r in runs], "has_data": [r[4] for r in runs]}
@@ -332,7 +334,7 @@ def hourly_json(td: pl.DataFrame) -> dict:
     for r, y, m, s, n in g.iter_rows():
         tot[(r, y, m, s)] = n
     cols = {k: [] for k in ("region", "satellite", "year", "month", "local_hour", "n_hotspots")}
-    sat_of = {"Terra": "TERRA", "Suomi NPP": C.SNPP_SET, "NOAA-20": "VIIRS_NOAA20"}
+    sat_of = {"Terra": "TERRA", "Suomi NPP": C.SNPP_SET, "NOAA-20": C.RELAY_SET}
     for ri, pid in enumerate(C.PRESET_IDS):
         parts = next(p for p in C.PRESETS if p["id"] == pid)["parts"]
         keys = sorted({(y, m) for (_, y, m, _) in tot})
@@ -353,7 +355,7 @@ def hourly_json(td: pl.DataFrame) -> dict:
 
 # -------------------------------------------------------------------- driver
 
-def generate(as_of: str = C.MOCK_AS_OF, data_dir=C.DATA_DIR, processed_dir=C.PROCESSED_DIR) -> None:
+def generate(as_of: str = C.MOCK_AS_OF, data_dir=C.DATA_DIR, processed_dir=C.MOCK_PROCESSED_DIR) -> None:
     """Write every upstream mock: Parquet hand-offs, upstream JSON and hotspot CSV headers."""
     processed_dir.mkdir(parents=True, exist_ok=True)
     (data_dir / "hotspots").mkdir(parents=True, exist_ok=True)
@@ -367,7 +369,12 @@ def generate(as_of: str = C.MOCK_AS_OF, data_dir=C.DATA_DIR, processed_dir=C.PRO
                       ("hourly", hourly_json(td)), ("drift", drift_json(cube, as_of)),
                       ("conversion", conversion_json(cube, zones)), ("validation", validation_json(cube)),
                       ("relay_sim", relay_sim_json(td))):
-        write_json(data_dir / f"{name}.json", obj)
+        target = data_dir / f"{name}.json"
+        if target.exists() and read_json(target).get("mock") is False:
+            continue                                  # never overwrite a real hand-off with a mock
+        write_json(target, obj)
     for pid in C.PRESET_IDS:                      # header only; M1 fills these per preset and year
+        if any((data_dir / "hotspots").glob(f"hotspots_{pid}_*.csv")):
+            continue
         (data_dir / "hotspots" / f"hotspots_{pid}_{as_of[:4]}.csv").write_text(
             ",".join(C.HOTSPOT_COLUMNS) + "\n", encoding="utf-8", newline="\n")

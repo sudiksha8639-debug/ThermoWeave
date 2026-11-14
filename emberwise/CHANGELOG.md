@@ -1,6 +1,6 @@
 # Schema changelog
 
-Owner: M3 (sole schema owner). Deputy: M6. Current `schema_version`: **1.0** (frozen at H2).
+Owner: M3 (sole schema owner). Deputy: M6. Current `schema_version`: **1.1**.
 
 ## Schema-change protocol (Build Plan v4, Section 5)
 
@@ -15,6 +15,28 @@ Owner: M3 (sole schema owner). Deputy: M6. Current `schema_version`: **1.0** (fr
 
 `check_contract` needs no hand edits: it reads the schema from `contracts.py`, so step 2 updates it.
 The web app should refuse a file whose `schema_version` it does not know.
+
+## 1.1 (H15, Stage C: first build from M1's real hand-off)
+
+Renames (agreed with M1's regions file and M4's frontend):
+- Preset id `punjab` -> `indian_punjab` everywhere it is a key (region_daily, climatology, periods,
+  narratives, regions, manifest.presets, hotspot CSV file names). `tile_day.region` is unchanged
+  (punjab, haryana, control).
+- hotspot CSV header: `daynight` -> `day_night`.
+
+Additive:
+- `regions[].tiles_in_scope.r5` and `.r7` may be null (M1 supplies them for the combined preset only).
+- `validation.baselines.result.zone_month_level`: the same three-way comparison per zone, month and hidden year.
+- `validation.rank_test.result.other_method`: the test repeated with the other allowed method.
+
+Unchanged from 1.0: sensor-set names (TERRA, MODIS_ALL, VIIRS_SNPP, VIIRS_NOAA20, VIIRS_NOAA21),
+all tile_month, tile_geometry, coverage, conversion and manifest fields.
+
+Not a schema change, but new behaviour:
+- `tile_day.parquet` is day passes only, one row per region, tile, date and sensor set (n_tile_day = 1).
+- The builder reads M1's hand-off from the repo-root `data/processed/` when it is there, otherwise the mocks.
+- While `USE_FALLBACK_CONVERSION` is True, M3 fits conversion.json, the hide-a-year block and relay_sim.json
+  from tile_day using the plan's method. `manifest.model_version` says so. M2's files replace them.
 
 ## 1.0 (H2 freeze)
 

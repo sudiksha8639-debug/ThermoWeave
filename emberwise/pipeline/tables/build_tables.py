@@ -5,3 +5,5 @@ if __name__ == "__main__":
     s = build.build()
     print(f"built tables: as of {s['as_of']}, {s['tiles']} tiles, {s['zones']} zones, "
           f"{s['months']} months, mock={s['mock']}; checks run: {', '.join(s['checks_run']) or 'none'}")
+    for key, value in s["notes"].items():
+        print(f"  {key}: {value}")

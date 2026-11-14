@@ -20,6 +20,7 @@ import polars as pl
 from . import analytics as A
 from . import checks
 from . import config as C
+from . import handoff
 from .contracts import CONTRACTS
 from .harmonize import convert_modis, harmonize, support_factor, trust_score
 from .jsonio import envelope, nan_array, qlist, read_json, sha256, write_json
@@ -30,11 +31,13 @@ AI_USE_NOTE = ("AI tools were used to help write code, documentation and plannin
 
 # -------------------------------------------------------------------- inputs
 
-def load_inputs(data_dir: Path, processed_dir: Path) -> dict:
-    """Read the hand-off files and index tiles and zones."""
+def load_inputs(data_dir: Path, processed_dir: Path, as_of: str | None = None) -> dict:
+    """Read the hand-off files and index tiles and zones. Rows after as_of are dropped."""
     all_tiles = pl.read_parquet(processed_dir / "tiles.parquet")
     tiles = all_tiles.filter(pl.col("region").is_in(C.BASE_REGIONS)).sort("h3_r6").with_row_index("tile")
     td = pl.read_parquet(processed_dir / "tile_day.parquet")
+    if as_of:
+        td = td.filter(pl.col("date") <= parse(as_of))
     zones = sorted(tiles["zone_r3"].unique().to_list())
     regions = read_json(data_dir / "regions.json")
     return {"tiles": tiles, "td": td, "zones": zones, "regions": regions,
@@ -43,7 +46,7 @@ def load_inputs(data_dir: Path, processed_dir: Path) -> dict:
             "zone_of_tile": np.array([zones.index(z) for z in tiles["zone_r3"].to_list()]),
             "region_of_tile": np.array([C.BASE_REGIONS.index(r) for r in tiles["region"].to_list()]),
             "control_tiles": all_tiles.filter(pl.col("region") == C.CONTROL_REGION["id"]).height,
-            "as_of": td["date"].max().isoformat(), "mock": bool(regions["mock"]),
+            "as_of": as_of or td["date"].max().isoformat(), "mock": bool(regions["mock"]),
             "generated_at": regions["generated_at"] if regions["mock"] else None}
 
 
@@ -118,12 +121,13 @@ def aggregate(inp: dict, flags: dict, n_days: int, n_months: int) -> dict:
 # ---------------------------------------------------------------- tile_month
 
 def month_label(ym: str, flags: dict, as_of: str) -> str:
-    """Provisional if any NRT day; Measured if every day with data is a VIIRS day; else the era label."""
+    """Provisional if any NRT day; Measured if most days with data are VIIRS days; else the era label."""
     a = day_index(ym + "-01")
     days = slice(a, a + days_in_month(ym, as_of))
     if flags["nrt"][days].any():
         return "Provisional"
-    if flags["vday"][days].any() and not flags["mday"][days].any():
+    v, m = int(flags["vday"][days].sum()), int(flags["mday"][days].sum())
+    if v and v / (v + m) >= C.MONTH_MEASURED_MIN_SHARE:
         return "Measured"
     return "Indicative" if era_of(ym) == "A" else "Estimated"
 
@@ -333,7 +337,7 @@ def manifest(inp: dict, months: list[str], labels_by_ym: list[str], data_dir: Pa
             "labels": C.LABELS, "presets": C.PRESET_IDS, "default_preset": C.DEFAULT_PRESET,
             "control_region": C.CONTROL_REGION["id"], "tile_count": len(inp["tiles"]),
             "relay_satellite": C.RELAY_SET, "firms_download_dates": {}, "product_versions": {},
-            "model_version": None,
+            "model_version": inp.get("model_version"),
             "boundary": {"source": inp["regions"]["regions"][0]["boundary_source"], "licence": None},
             "ai_use_note": AI_USE_NOTE, "safety_disclaimer": C.SAFETY_DISCLAIMER,
             "budget_mb": C.SIZE_BUDGET_MB, "precache": precache_list(years), "files": files}
@@ -358,8 +362,13 @@ def update_validation(data_dir: Path, agg, inp, flags, tab, months, cal, rd) -> 
 # -------------------------------------------------------------------- driver
 
 def build(data_dir: Path = C.DATA_DIR, processed_dir: Path = C.PROCESSED_DIR) -> dict:
-    """Build every M3 table. Returns a short summary."""
-    inp = load_inputs(data_dir, processed_dir)
+    """Build every M3 table. Returns a short summary.
+
+    With M1's real hand-off in processed_dir, the upstream JSON files are written from it first.
+    """
+    notes = handoff.prepare(data_dir, processed_dir) if handoff.is_real(processed_dir) else {}
+    inp = load_inputs(data_dir, processed_dir, notes.get("as_of"))
+    inp["model_version"] = notes.get("model_version")
     months = month_list(inp["as_of"])
     n_days = day_index(inp["as_of"]) + 1
     cal = A.day_calendar(n_days)
@@ -385,5 +394,5 @@ def build(data_dir: Path = C.DATA_DIR, processed_dir: Path = C.PROCESSED_DIR) ->
     done = update_validation(data_dir, agg, inp, flags, tab, months, cal, rd)
     labels_by_ym = [month_label(ym, flags, inp["as_of"]) for ym in months]
     put("manifest.json", manifest(inp, months, labels_by_ym, data_dir))
-    return {"checks_run": done, "as_of": inp["as_of"], "tiles": len(inp["tiles"]), "zones": len(inp["zones"]),
+    return {"notes": notes, "checks_run": done, "as_of": inp["as_of"], "tiles": len(inp["tiles"]), "zones": len(inp["zones"]),
             "months": len(months), "mock": inp["mock"]}

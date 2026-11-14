@@ -1,7 +1,7 @@
 # EMBERWISE M3 targets. Include from the root Makefile (M1 owns it):  include Makefile.tables
 # One command for M3's work:  make tables
 PY ?= python3
-HANDOFF = data/processed/tile_day.parquet
+HANDOFF = data/processed/tile_day.parquet   # mock hand-off; ignored when ../data/processed has M1's real files
 
 .PHONY: tables mocks schema check size test-tables
 

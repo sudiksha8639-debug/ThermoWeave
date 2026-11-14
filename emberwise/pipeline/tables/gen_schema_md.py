@@ -73,7 +73,7 @@ def main() -> None:
         parts.append(f"### {name}: `{fname}`\n\n{desc}\n\n| column | kind |\n|---|---|")
         parts += [f"| `{c}` | {k} |" for c, k in cols.items()]
         parts.append("")
-    parts.append(f"`sensor_set` values: {', '.join(C.SENSOR_SETS)} [verify names with M1]. "
+    parts.append(f"`sensor_set` values: {', '.join(C.SENSOR_SETS)}. "
                  f"`product` values: {', '.join(C.PRODUCTS)}.\n")
     C.DOCS_DIR.mkdir(exist_ok=True)
     (C.DOCS_DIR / "schema.md").write_text("\n".join(parts), encoding="utf-8", newline="\n")

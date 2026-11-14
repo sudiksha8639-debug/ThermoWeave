@@ -111,8 +111,38 @@ def baselines(hide: dict, modis_by_region_year: dict) -> dict:
             errs[key].append(abs(guess - actual) / actual)
     n = len(errs["per_zone_month"])
     out = {k: round(100 * float(np.mean(v)), 1) if n else None for k, v in errs.items()}
-    beats = (out["per_zone_month"] < min(out["global_ratio"], out["no_conversion"])) if n else None
+    beats = bool(out["per_zone_month"] < min(out["global_ratio"], out["no_conversion"])) if n else None
     return {"metric": "mean absolute percent error", "n": n, **out, "beats_both": beats}
+
+
+def zone_month_baselines(agg: dict, inp: dict, months: list[str]) -> dict:
+    """The same three-way comparison one level down: each zone, month and hidden year.
+
+    Uses the plan's fit (refitted here without the hidden year), one global ratio from the other
+    years, and no conversion. Zone-months with under CONVERSION_MIN_ACTUAL VIIRS tile-days are skipped.
+    """
+    from . import conversion as CV
+    y0, y1 = C.LEARNING_WINDOW
+    nz = len(inp["zones"])
+    V, M = np.zeros((nz, y1 - y0 + 1, 12)), np.zeros((nz, y1 - y0 + 1, 12))
+    for j, ym in enumerate(months):
+        y, m = int(ym[:4]), int(ym[5:7])
+        if y0 <= y <= y1 and (y, m) != (y0, 1):
+            np.add.at(V[:, y - y0, m - 1], inp["zone_of_tile"], agg["v_td_month"][:, j])
+            np.add.at(M[:, y - y0, m - 1], inp["zone_of_tile"], agg["m_all_td_month"][:, j])
+    errs = {"per_zone_month": [], "global_ratio": [], "no_conversion": []}
+    for yi in range(V.shape[1]):
+        keep = np.arange(V.shape[1]) != yi
+        fit = CV.fit_ratio(V[:, keep], M[:, keep])
+        g = V[:, keep].sum() / M[:, keep].sum()
+        actual, m = V[:, yi], M[:, yi]
+        ok = actual >= C.CONVERSION_MIN_ACTUAL
+        for key, guess in (("per_zone_month", m * fit["ratio"]), ("global_ratio", m * g), ("no_conversion", m)):
+            errs[key] += (np.abs(guess[ok] - actual[ok]) / actual[ok]).tolist()
+    n = len(errs["per_zone_month"])
+    out = {k: round(100 * float(np.mean(v)), 1) if n else None for k, v in errs.items()}
+    return {"n": n, **out,
+            "beats_both": bool(out["per_zone_month"] < min(out["global_ratio"], out["no_conversion"])) if n else None}
 
 
 def modis_region_year(agg: dict, inp: dict, months: list[str]) -> dict:
@@ -123,6 +153,8 @@ def modis_region_year(agg: dict, inp: dict, months: list[str]) -> dict:
         sel = np.isin(inp["region_of_tile"], [C.BASE_REGIONS.index(r) for r in p["parts"]])
         col = agg["m_all_td_month"][sel].sum(axis=0)
         for j, ym in enumerate(months):
+            if ym == f"{C.LEARNING_WINDOW[0]}-01":
+                continue                                    # partial VIIRS month, left out of the fit too
             if use is None or int(ym[5:7]) in use:
                 out[ri, int(ym[:4])] = out.get((ri, int(ym[:4])), 0.0) + float(col[j])
     return out
@@ -141,9 +173,10 @@ def yearly_season_total(harm, cal: dict, months=C.PILOT_MONTHS) -> dict:
     return out
 
 
-def read_external(path: Path = C.EXTERNAL_FILE) -> dict | None:
+def read_external(path: Path | None = None) -> dict | None:
     """{year: value} from the outside series CSV (columns year,value); None if the file is absent."""
-    if not Path(path).exists():
+    path = Path(path or C.EXTERNAL_FILE)
+    if not path.exists():
         return None
     with open(path, newline="", encoding="utf-8") as f:
         return {int(r["year"]): float(r["value"]) for r in csv.DictReader(f) if r["value"] not in ("", None)}
@@ -194,10 +227,12 @@ def run_all(agg: dict, inp: dict, flags: dict, tab: dict, months: list[str], cal
     from .jsonio import nan_array
     out = {}
     x, y, g = monthly_pairs(agg, inp, flags, tab, months, C.DEFAULT_PRESET)
-    out["rank_test"] = rank_test(x, y, g)
+    other = "within_month" if C.RANK_METHOD == "deseasonalized" else "deseasonalized"
+    out["rank_test"] = {**rank_test(x, y, g), "other_method": rank_test(x, y, g, method=other)}
     hide = (validation.get("hide_a_year") or {}).get("result")
     if hide:
-        out["baselines"] = baselines(hide["columns"], modis_region_year(agg, inp, months))
+        out["baselines"] = {**baselines(hide["columns"], modis_region_year(agg, inp, months)),
+                            "zone_month_level": zone_month_baselines(agg, inp, months)}
     external = read_external()
     if external:
         harm = nan_array(rd["presets"][C.EXTERNAL_PRESET]["harm"])
