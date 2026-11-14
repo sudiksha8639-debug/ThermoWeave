@@ -7,3 +7,17 @@ dist/
 .DS_Store
 *.tsbuildinfo
 coverage/
+# FIRMS data (large, not committed)
+data/raw/
+data/processed/
+
+# Keys
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
