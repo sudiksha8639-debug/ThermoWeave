@@ -19,31 +19,8 @@ function inBBox(lon: number, lat: number, b: [number, number, number, number]) {
 }
 
 export function AreaPicker() {
-  // On small screens the picker collapses into a drawer; on lg+ it is always open.
-  const [open, setOpen] = useState(false);
-  return (
-    <section aria-label="Area picker" className="rounded-lg border border-line bg-surface-2">
-      <button
-        className="flex w-full items-center justify-between px-4 py-3 text-left lg:hidden"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        aria-controls="area-picker-body"
-      >
-        <span className="text-sm font-semibold uppercase tracking-wider text-ink-dim">
-          Area &amp; period
-        </span>
-        <span className="text-xs text-ink-dim" aria-hidden="true">{open ? '▾' : '▸'}</span>
-      </button>
-      <div id="area-picker-body" className={open ? 'block' : 'hidden lg:block'}>
-        <AreaPickerBody />
-      </div>
-    </section>
-  );
-}
-
-function AreaPickerBody() {
   const { regionId, setRegionId, startYm, endYm, setRange } = useApp();
-  const { data, loading, error, retry } = useData(loadRegions, []);
+  const { data, loading, error } = useData(loadRegions, []);
   const regions = data?.regions ?? [];
   const region: Region | undefined = regions.find((r) => r.id === regionId);
 
@@ -80,22 +57,12 @@ function AreaPickerBody() {
   };
 
   return (
-    <div className="p-4">
-      <h2 className="mb-3 hidden text-sm font-semibold uppercase tracking-wider text-ink-dim lg:block">
+    <section aria-label="Area picker" className="rounded-lg border border-line bg-surface-2 p-4">
+      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-ink-dim">
         Area &amp; period
       </h2>
       {loading && <p className="text-sm text-ink-dim">Loading regions…</p>}
-      {error && (
-        <p className="flex items-center gap-2 text-sm text-red-300">
-          <span>{error}</span>
-          <button
-            onClick={retry}
-            className="rounded border border-red-400/50 px-1.5 py-0.5 text-[10px] hover:bg-red-500/20"
-          >
-            Retry
-          </button>
-        </p>
-      )}
+      {error && <p className="text-sm text-red-300">{error}</p>}
 
       <div className="grid gap-4 md:grid-cols-3">
         <div>
@@ -193,6 +160,6 @@ function AreaPickerBody() {
           </div>
         </div>
       </div>
-    </div>
+    </section>
   );
 }

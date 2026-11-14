@@ -1,10 +1,9 @@
 // EMBERWISE service worker.
-// - Precaches the app shell (built assets via sw-manifest.json) plus the data
-//   files listed in data/manifest.json `precache` (entries may be logical
-//   keys like "regions"/"tile_month_2024" or paths like "data/regions.json").
+// - Precaches the app shell (built assets via sw-manifest.json) and the core
+//   data files + last five years of tile_month for the default preset.
 // - Offline: anything not cached answers "Not cached. Connect to load this."
 
-const VERSION = 'emberwise-v2';
+const VERSION = 'emberwise-v1';
 const SHELL = `emberwise-shell-${VERSION}`;
 const DATA = `emberwise-data-${VERSION}`;
 
@@ -15,8 +14,9 @@ const STATIC = [
   './icon.svg',
 ];
 
-// Fallback precache if manifest.json cannot be fetched at install time.
-const FALLBACK_DATA_FILES = [
+// Core data files to precache (relative to scope). The last five years of
+// tile_month cover 2022–2026 for the default preset (Punjab + Haryana).
+const DATA_FILES = [
   'data/regions.json',
   'data/coverage.json',
   'data/validation.json',
@@ -36,44 +36,6 @@ const FALLBACK_DATA_FILES = [
   'data/tile_month_2026.json',
 ];
 
-// Normalise a manifest.precache entry to a scope-relative URL.
-// Accepts keys ("regions", "tile_month_2024") and paths
-// ("data/regions.json", "/data/regions.json", "./data/regions.json").
-function precacheEntryToUrl(entry) {
-  if (typeof entry !== 'string' || !entry) return null;
-  let e = entry.trim();
-  if (e.startsWith('./')) e = e.slice(2);
-  if (e.startsWith('/')) e = e.slice(1);
-  if (/^https?:\/\//.test(e)) return null; // external — skip
-  if (!e.includes('/')) {
-    // logical key: "regions" or "tile_month_2024" (or bare "x.json")
-    e = /\.(json|csv|geojson)$/i.test(e) ? `data/${e}` : `data/${e}.json`;
-  } else if (!e.startsWith('data/')) {
-    return null; // only data/ paths are precached
-  }
-  return `./${e}`;
-}
-
-async function resolvePrecache() {
-  const urls = new Set(FALLBACK_DATA_FILES.map((f) => `./${f}`));
-  try {
-    const res = await fetch('./data/manifest.json');
-    if (res.ok) {
-      const manifest = await res.json();
-      const list = Array.isArray(manifest.precache) ? manifest.precache : [];
-      // `files` keys are an acceptable alternative spelling.
-      const keys = manifest.files && typeof manifest.files === 'object'
-        ? Object.keys(manifest.files)
-        : [];
-      for (const entry of [...list, ...keys]) {
-        const u = precacheEntryToUrl(entry);
-        if (u) urls.add(u);
-      }
-    }
-  } catch {}
-  return [...urls];
-}
-
 self.addEventListener('install', (event) => {
   event.waitUntil(
     (async () => {
@@ -89,8 +51,7 @@ self.addEventListener('install', (event) => {
       } catch {}
 
       const data = await caches.open(DATA);
-      const urls = await resolvePrecache();
-      await Promise.allSettled(urls.map((u) => data.add(u)));
+      await Promise.allSettled(DATA_FILES.map((f) => data.add(`./${f}`)));
       await self.skipWaiting();
     })()
   );
@@ -111,14 +72,8 @@ self.addEventListener('activate', (event) => {
 });
 
 function isDataRequest(url) {
-  return url.pathname.includes('/data/') || /\.(json|csv|geojson)$/i.test(url.pathname);
+  return url.pathname.includes('/data/') || url.pathname.endsWith('.json');
 }
-
-const NOT_CACHED = () =>
-  new Response('Not cached. Connect to load this.', {
-    status: 503,
-    headers: { 'Content-Type': 'text/plain' },
-  });
 
 self.addEventListener('fetch', (event) => {
   const { request } = event;
@@ -134,8 +89,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-first for assets and data; anything outside the precache that also
-  // fails on the network gets the explicit not-cached message.
+  // Cache-first for assets and data
   event.respondWith(
     (async () => {
       const cacheName = isDataRequest(url) ? DATA : SHELL;
@@ -149,10 +103,13 @@ self.addEventListener('fetch', (event) => {
         }
         return res;
       } catch {
-        if (isDataRequest(url)) return NOT_CACHED();
-        // last resort for non-data assets: try any cache, then not-cached
-        const any = await caches.match(request);
-        return any ?? NOT_CACHED();
+        if (isDataRequest(url)) {
+          return new Response('Not cached. Connect to load this.', {
+            status: 503,
+            headers: { 'Content-Type': 'text/plain' },
+          });
+        }
+        return caches.match('./index.html');
       }
     })()
   );

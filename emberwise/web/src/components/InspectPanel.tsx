@@ -1,14 +1,6 @@
 import { useMemo } from 'react';
-import {
-  SENSOR_MODES,
-  tmNum,
-  ymToLabel,
-  type TileGeometry,
-  type TmCol,
-  type TrustLabel,
-} from '../types';
+import { SENSOR_MODES, tmNum, ymToLabel, type TileGeometry, type TmCol } from '../types';
 import { LabelChip } from './LabelChip';
-import { SaturationFlag } from './SaturationFlag';
 import type { InspectTarget } from '../state';
 
 interface Props {
@@ -17,11 +9,9 @@ interface Props {
   columns: string[];
   geometry: TileGeometry[];
   valueCol: TmCol;
-  /** Trust label for the region/month context (e.g. era trust). */
-  regionTrust?: TrustLabel | null;
 }
 
-export function InspectPanel({ target, rowsForYm, columns, geometry, valueCol, regionTrust }: Props) {
+export function InspectPanel({ target, rowsForYm, columns, geometry, valueCol }: Props) {
   const detail = useMemo(() => {
     if (!target?.tile && target?.ym === undefined) return null;
     const g = target.tile !== undefined ? geometry[target.tile] : undefined;
@@ -34,7 +24,6 @@ export function InspectPanel({ target, rowsForYm, columns, geometry, valueCol, r
     return (
       <aside className="rounded-lg border border-line bg-surface-2 p-4 text-sm text-ink-dim">
         Click a tile on the map to inspect it, or drag a rectangle to filter.
-        Use the tile list below the map for keyboard navigation.
       </aside>
     );
   }
@@ -44,7 +33,6 @@ export function InspectPanel({ target, rowsForYm, columns, geometry, valueCol, r
   const trust = row ? (row[columns.indexOf('trust')] as string | undefined) : undefined;
   const lo = row ? tmNum(row, columns, 'lo') : null;
   const hi = row ? tmNum(row, columns, 'hi') : null;
-  const frac = row ? tmNum(row, columns, 'frac_burning') : null;
 
   return (
     <aside className="rounded-lg border border-line bg-surface-2 p-4 text-sm" aria-live="polite">
@@ -57,18 +45,6 @@ export function InspectPanel({ target, rowsForYm, columns, geometry, valueCol, r
           Tile centre {g.cy.toFixed(4)}°N, {g.cx.toFixed(4)}°E · res {g.res}
         </p>
       )}
-      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-ink-dim">
-        {regionTrust && (
-          <span className="inline-flex items-center gap-1.5">
-            Region trust <LabelChip label={regionTrust} />
-          </span>
-        )}
-        {trust && (
-          <span className="inline-flex items-center gap-1.5">
-            Tile trust <LabelChip label={trust} />
-          </span>
-        )}
-      </div>
       {!row && (
         <p className="text-ink-dim">
           No observation for this tile-month — a data gap, not zero.
@@ -88,7 +64,6 @@ export function InspectPanel({ target, rowsForYm, columns, geometry, valueCol, r
                 <td className="py-0.5">{s.label}</td>
                 <td className="py-0.5 text-right">
                   {tmNum(row, columns, s.column) ?? '—'}
-                  <span className="ml-1 text-[9px] uppercase text-ink-dim">tile-days</span>
                 </td>
               </tr>
             ))}
@@ -97,12 +72,12 @@ export function InspectPanel({ target, rowsForYm, columns, geometry, valueCol, r
       )}
       {row && (
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-ink-dim">
+          {trust && <LabelChip label={trust} />}
           {lo !== null && hi !== null && (
             <span>
-              lo–hi: {lo} – {hi} tile-days
+              lo–hi: {lo} – {hi}
             </span>
           )}
-          <SaturationFlag fracBuring={frac} />
         </div>
       )}
     </aside>

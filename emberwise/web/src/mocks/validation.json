@@ -1,1 +1,1 @@
-{"schema_version":"1.0","summary":"Mock validation summary. Real file compares harmonized tile-days against held-out VIIRS weeks.","metrics":{"mae_tile_days":1.8,"within_band_pct":82,"n_weeks":312}}
+{"summary":"Mock validation summary. Real file compares harmonized tile-days against held-out VIIRS weeks.","metrics":{"mae_tile_days":1.8,"within_band_pct":82,"n_weeks":312}}

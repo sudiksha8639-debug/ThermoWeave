@@ -25,7 +25,7 @@ function LabCard({
 }: {
   title: string;
   chip?: string;
-  state: { loading: boolean; error: string | null; retry: () => void };
+  state: { loading: boolean; error: string | null };
   children: React.ReactNode;
 }) {
   return (
@@ -35,17 +35,7 @@ function LabCard({
         {chip && <LabelChip label={chip} />}
       </header>
       {state.loading && <p className="text-xs" style={{ color: INK_DIM }}>Loading…</p>}
-      {state.error && (
-        <p className="flex items-center gap-2 text-xs text-red-300">
-          <span>{state.error}</span>
-          <button
-            onClick={state.retry}
-            className="rounded border border-red-400/50 px-1.5 py-0.5 text-[10px] hover:bg-red-500/20"
-          >
-            Retry
-          </button>
-        </p>
-      )}
+      {state.error && <p className="text-xs text-red-300">{state.error}</p>}
       {!state.loading && !state.error && children}
     </section>
   );
