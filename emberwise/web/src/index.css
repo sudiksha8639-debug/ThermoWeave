@@ -33,3 +33,26 @@ canvas {
   outline: 2px solid var(--color-accent-2);
   outline-offset: 2px;
 }
+
+/* Keyboard users always get a visible focus ring, including on buttons
+   that only show a hover state. */
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--color-accent-2);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

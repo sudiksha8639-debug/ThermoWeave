@@ -19,6 +19,29 @@ function inBBox(lon: number, lat: number, b: [number, number, number, number]) {
 }
 
 export function AreaPicker() {
+  // On small screens the picker collapses into a drawer; on lg+ it is always open.
+  const [open, setOpen] = useState(false);
+  return (
+    <section aria-label="Area picker" className="rounded-lg border border-line bg-surface-2">
+      <button
+        className="flex w-full items-center justify-between px-4 py-3 text-left lg:hidden"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-controls="area-picker-body"
+      >
+        <span className="text-sm font-semibold uppercase tracking-wider text-ink-dim">
+          Area &amp; period
+        </span>
+        <span className="text-xs text-ink-dim" aria-hidden="true">{open ? '▾' : '▸'}</span>
+      </button>
+      <div id="area-picker-body" className={open ? 'block' : 'hidden lg:block'}>
+        <AreaPickerBody />
+      </div>
+    </section>
+  );
+}
+
+function AreaPickerBody() {
   const { regionId, setRegionId, startYm, endYm, setRange } = useApp();
   const { data, loading, error } = useData(loadRegions, []);
   const regions = data?.regions ?? [];
@@ -57,8 +80,8 @@ export function AreaPicker() {
   };
 
   return (
-    <section aria-label="Area picker" className="rounded-lg border border-line bg-surface-2 p-4">
-      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-ink-dim">
+    <div className="p-4">
+      <h2 className="mb-3 hidden text-sm font-semibold uppercase tracking-wider text-ink-dim lg:block">
         Area &amp; period
       </h2>
       {loading && <p className="text-sm text-ink-dim">Loading regions…</p>}
@@ -160,6 +183,6 @@ export function AreaPicker() {
           </div>
         </div>
       </div>
-    </section>
+    </div>
   );
 }
