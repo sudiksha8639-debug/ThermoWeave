@@ -1,0 +1,219 @@
+{
+ "generated_at": "2026-11-15T08:30:37Z",
+ "clock_ledger_is_mock": false,
+ "relay": {
+  "target_local_hour": 13.5,
+  "candidates": [
+   {
+    "sensor_set": "VIIRS_NOAA20",
+    "satellite": "NOAA-20",
+    "shared_seasons": [
+     2018,
+     2019,
+     2020,
+     2021,
+     2022,
+     2023,
+     2024,
+     2025
+    ],
+    "qualifies": true,
+    "median_local_hour": 13.15,
+    "hours_from_target": 0.35
+   },
+   {
+    "sensor_set": "VIIRS_NOAA21",
+    "satellite": "NOAA-21",
+    "shared_seasons": [
+     2023,
+     2024,
+     2025
+    ],
+    "qualifies": true,
+    "median_local_hour": 13.13,
+    "hours_from_target": 0.373
+   }
+  ],
+  "chosen": {
+   "sensor_set": "VIIRS_NOAA20",
+   "satellite": "NOAA-20",
+   "shared_seasons": [
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "qualifies": true,
+   "median_local_hour": 13.15,
+   "hours_from_target": 0.35,
+   "provisional": true,
+   "reason": "closest to 13:30 among satellites that meet the overlap rule; the margin over the other candidate is only 0.023 h, so the choice is provisional"
+  },
+  "sensor_loss_tests": [
+   {
+    "season": 2025,
+    "relay": "VIIRS_NOAA20",
+    "calibration_years": [
+     2018,
+     2019,
+     2020,
+     2021,
+     2022,
+     2023
+    ],
+    "alignment_factor": 0.9588,
+    "suomi_actual": 3500.0,
+    "relay_built": 3607.9,
+    "pct_diff": 3.1,
+    "daily_rho_deseasonalized": 0.986,
+    "rho_pass_mark": 0.85
+   },
+   {
+    "season": 2021,
+    "relay": "VIIRS_NOAA20",
+    "calibration_years": [
+     2018,
+     2019,
+     2020,
+     2022,
+     2023
+    ],
+    "alignment_factor": 0.9529,
+    "suomi_actual": 25694.0,
+    "relay_built": 24945.6,
+    "pct_diff": -2.9,
+    "daily_rho_deseasonalized": 0.81,
+    "rho_pass_mark": 0.85
+   }
+  ],
+  "other_candidate_test": {
+   "season": 2025,
+   "relay": "VIIRS_NOAA21",
+   "calibration_years": [
+    2023,
+    2024
+   ],
+   "alignment_factor": 0.9205,
+   "suomi_actual": 3500.0,
+   "relay_built": 3432.4,
+   "pct_diff": -1.9,
+   "daily_rho_deseasonalized": 0.915,
+   "rho_pass_mark": 0.85
+  }
+ },
+ "saturation": {
+  "saturation_share": 0.5,
+  "learning_window": [
+   2012,
+   2019
+  ],
+  "presets": {
+   "indian_punjab": {
+    "max_viirs_share": 0.761,
+    "max_proportional_prediction": 1.467,
+    "active_days": {
+     "proportional": {
+      "n_days": 414,
+      "abs_error_pct": 61.0,
+      "bias_pct": -10.5
+     },
+     "saturating": {
+      "n_days": 414,
+      "abs_error_pct": 52.3,
+      "bias_pct": -22.9
+     }
+    },
+    "high_days": {
+     "proportional": {
+      "n_days": 85,
+      "abs_error_pct": 61.1,
+      "bias_pct": 11.9
+     },
+     "saturating": {
+      "n_days": 85,
+      "abs_error_pct": 39.6,
+      "bias_pct": -17.3
+     }
+    },
+    "better_on_high_days": "saturating",
+    "used_in_headline": "proportional"
+   },
+   "haryana": {
+    "max_viirs_share": 0.197,
+    "max_proportional_prediction": 0.386,
+    "active_days": {
+     "proportional": {
+      "n_days": 389,
+      "abs_error_pct": 63.6,
+      "bias_pct": 1.2
+     },
+     "saturating": {
+      "n_days": 389,
+      "abs_error_pct": 54.6,
+      "bias_pct": -29.5
+     }
+    },
+    "high_days": {
+     "proportional": {
+      "n_days": 0,
+      "abs_error_pct": null,
+      "bias_pct": null
+     },
+     "saturating": {
+      "n_days": 0,
+      "abs_error_pct": null,
+      "bias_pct": null
+     }
+    },
+    "better_on_high_days": null,
+    "used_in_headline": "proportional"
+   },
+   "punjab_haryana": {
+    "max_viirs_share": 0.493,
+    "max_proportional_prediction": 0.945,
+    "active_days": {
+     "proportional": {
+      "n_days": 413,
+      "abs_error_pct": 60.1,
+      "bias_pct": -9.2
+     },
+     "saturating": {
+      "n_days": 413,
+      "abs_error_pct": 51.6,
+      "bias_pct": -31.6
+     }
+    },
+    "high_days": {
+     "proportional": {
+      "n_days": 0,
+      "abs_error_pct": null,
+      "bias_pct": null
+     },
+     "saturating": {
+      "n_days": 0,
+      "abs_error_pct": null,
+      "bias_pct": null
+     }
+    },
+    "better_on_high_days": null,
+    "used_in_headline": "proportional"
+   }
+  }
+ },
+ "nrt_seam": {
+  "tested": false,
+  "months_with_both_products": 0,
+  "nrt_starts": {
+   "MODIS_ALL": "2026-09-09",
+   "TERRA": "2026-09-09",
+   "VIIRS_NOAA20": "2026-08-02",
+   "VIIRS_NOAA21": "2026-08-02",
+   "VIIRS_SNPP": "2026-08-02"
+  },
+  "reason": "tile_day.parquet holds one product per day; the comparison needs M1's nrt_sp_pairs.parquet"
+ }
+}
