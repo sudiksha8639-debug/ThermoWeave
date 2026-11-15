@@ -1,0 +1,20 @@
+stage,key,rows
+raw,fire_archive_J1V-C2_845475.csv,885060
+raw,fire_nrt_J1V-C2_845475.csv,7743
+raw,fire_archive_J2V-C2_845518.csv,251403
+raw,fire_nrt_J2V-C2_845518.csv,6748
+raw,fire_archive_M-C61_845498.csv,539793
+raw,fire_nrt_M-C61_845498.csv,3091
+raw,fire_archive_SV-C2_845493.csv,1642993
+raw,fire_nrt_SV-C2_845493.csv,5991
+raw,fire_archive_SV-C2_846801.csv,69639
+clean,MODIS|pbhr|NRT,2993
+clean,MODIS|pbhr|SP,514912
+clean,N20|pbhr|NRT,7393
+clean,N20|pbhr|SP,743674
+clean,N21|pbhr|NRT,6291
+clean,N21|pbhr|SP,195672
+clean,SNPP|control|SP,59345
+clean,SNPP|pbhr|NRT,5684
+clean,SNPP|pbhr|SP,1411016
+clean,TOTAL hotspots_clean.parquet,2946980
