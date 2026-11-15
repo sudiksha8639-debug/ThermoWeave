@@ -1,0 +1,236 @@
+{
+  "manifest_version": "1.0",
+  "project": "EMBERWISE",
+  "generated_utc": "2026-11-15T10:55:05+00:00",
+  "provider": "NASA FIRMS (Fire Information for Resource Management System), NASA EOSDIS / LANCE",
+  "raw_files": [
+    {
+      "file": "fire_archive_J1V-C2_845475.csv",
+      "request_id": "845475",
+      "source": "NOAA-20 (J1) VIIRS C2",
+      "kind": "SP",
+      "requested_window": "2018-04-01 to 2026-11-05",
+      "bbox": "W73.5 S27.4 E78 N32.8",
+      "request_time_as_shown_by_firms": "2026-11-13 18:10:37",
+      "rows": 885060,
+      "first_acq_date": "2018-04-01",
+      "last_acq_date": "2026-07-31",
+      "sha256": "0279711b677d8f67c68327486fff6b817a68c616e417d6baba25d2087862a81c"
+    },
+    {
+      "file": "fire_nrt_J1V-C2_845475.csv",
+      "request_id": "845475",
+      "source": "NOAA-20 (J1) VIIRS C2",
+      "kind": "NRT",
+      "requested_window": "2018-04-01 to 2026-11-05",
+      "bbox": "W73.5 S27.4 E78 N32.8",
+      "request_time_as_shown_by_firms": "2026-11-13 18:10:37",
+      "rows": 7743,
+      "first_acq_date": "2026-08-01",
+      "last_acq_date": "2026-11-05",
+      "sha256": "3ad7b57b0b9e37ae01a19c6e1cd7d45d77f2a7bc4851ed3ec6873d54706e7d95"
+    },
+    {
+      "file": "fire_archive_J2V-C2_845518.csv",
+      "request_id": "845518",
+      "source": "NOAA-21 (J2) VIIRS C2",
+      "kind": "SP",
+      "requested_window": "2023-03-01 to 2026-11-05",
+      "bbox": "W73.5 S27.4 E78 N32.8",
+      "request_time_as_shown_by_firms": "2026-11-13 18:31:51",
+      "rows": 251403,
+      "first_acq_date": "2023-03-01",
+      "last_acq_date": "2026-07-31",
+      "sha256": "9f0299b2956a96cc403638bbb4dfa2d19936b549c264854c85301779758f944a"
+    },
+    {
+      "file": "fire_nrt_J2V-C2_845518.csv",
+      "request_id": "845518",
+      "source": "NOAA-21 (J2) VIIRS C2",
+      "kind": "NRT",
+      "requested_window": "2023-03-01 to 2026-11-05",
+      "bbox": "W73.5 S27.4 E78 N32.8",
+      "request_time_as_shown_by_firms": "2026-11-13 18:31:51",
+      "rows": 6748,
+      "first_acq_date": "2026-08-01",
+      "last_acq_date": "2026-11-05",
+      "sha256": "266e18b6e06753ea60f04179417aa9bab9f1ad7655120ef1e1663e6436ef9bce"
+    },
+    {
+      "file": "fire_archive_M-C61_845498.csv",
+      "request_id": "845498",
+      "source": "MODIS C6.1 (Terra + Aqua)",
+      "kind": "SP",
+      "requested_window": "2000-11-01 to 2026-11-05",
+      "bbox": "W73.5 S27.4 E78 N32.8",
+      "request_time_as_shown_by_firms": "2026-11-13 18:22:18",
+      "rows": 539793,
+      "first_acq_date": "2000-11-01",
+      "last_acq_date": "2026-08-30",
+      "sha256": "051288c58b97c641649db5ea383213871ed596bf2beafe3844c23dda1396065b"
+    },
+    {
+      "file": "fire_nrt_M-C61_845498.csv",
+      "request_id": "845498",
+      "source": "MODIS C6.1 (Terra + Aqua)",
+      "kind": "NRT",
+      "requested_window": "2000-11-01 to 2026-11-05",
+      "bbox": "W73.5 S27.4 E78 N32.8",
+      "request_time_as_shown_by_firms": "2026-11-13 18:22:18",
+      "rows": 3091,
+      "first_acq_date": "2026-09-03",
+      "last_acq_date": "2026-11-05",
+      "sha256": "68088a7b3f31fe704501f47a8da3c0d49d15bf3c07443d9bd962794e005f4823"
+    },
+    {
+      "file": "fire_archive_SV-C2_845493.csv",
+      "request_id": "845493",
+      "source": "Suomi NPP VIIRS C2",
+      "kind": "SP",
+      "requested_window": "2012-01-20 to 2026-11-02",
+      "bbox": "W73.5 S27.4 E78 N32.8",
+      "request_time_as_shown_by_firms": "2026-11-13 18:20:59",
+      "rows": 1642993,
+      "first_acq_date": "2012-01-20",
+      "last_acq_date": "2026-07-31",
+      "sha256": "08c23c442a15e19955dacc755571844018ee1cb0e0da04c3e99bc16614baf532"
+    },
+    {
+      "file": "fire_nrt_SV-C2_845493.csv",
+      "request_id": "845493",
+      "source": "Suomi NPP VIIRS C2",
+      "kind": "NRT",
+      "requested_window": "2012-01-20 to 2026-11-02",
+      "bbox": "W73.5 S27.4 E78 N32.8",
+      "request_time_as_shown_by_firms": "2026-11-13 18:20:59",
+      "rows": 5991,
+      "first_acq_date": "2026-08-01",
+      "last_acq_date": "2026-11-02",
+      "sha256": "cbed93695d382232e8e2db480fec8f7099aa6e2395f3e4efd8c6b6355e571436"
+    },
+    {
+      "file": "fire_archive_SV-C2_846801.csv",
+      "request_id": "846801",
+      "source": "Suomi NPP VIIRS C2, control box",
+      "kind": "SP",
+      "requested_window": "2012-01-20 to 2025-12-31",
+      "bbox": "W76 S31 E79.5 N33.5",
+      "request_time_as_shown_by_firms": "2026-11-14 06:21:59",
+      "rows": 69639,
+      "first_acq_date": "2012-01-23",
+      "last_acq_date": "2025-12-30",
+      "sha256": "26389128414ca66425aaaa5a98c427b49e3109b2a6700287061070d7a0c4cc5b"
+    }
+  ],
+  "processing": {
+    "cleaning": [
+      "SP files: keep type 0 (presumed vegetation fire); NRT files have no type column",
+      "VIIRS: keep nominal (n) and high (h) confidence; MODIS: confidence 30 or above",
+      "drop exact duplicates",
+      "static-source mask built from SP history and applied to all eras",
+      "clip to Punjab and Haryana state polygons (centroid inside)"
+    ],
+    "local_solar_time": "local_hours = UTC hours + longitude/15; local_date = UTC date + floor(local_hours/24)",
+    "tile": "H3 resolution 6 (sensitivity at 5 and 7), zone at resolution 3",
+    "conversion_learning_window": "2012-2019"
+  },
+  "boundary_source": "Survey of India state boundaries (Punjab, Haryana); district file for Lahul and Spiti; terms in docs/DATA_SOURCES.md",
+  "row_audit": [
+    {
+      "stage": "raw",
+      "key": "fire_archive_J1V-C2_845475.csv",
+      "rows": "885060"
+    },
+    {
+      "stage": "raw",
+      "key": "fire_nrt_J1V-C2_845475.csv",
+      "rows": "7743"
+    },
+    {
+      "stage": "raw",
+      "key": "fire_archive_J2V-C2_845518.csv",
+      "rows": "251403"
+    },
+    {
+      "stage": "raw",
+      "key": "fire_nrt_J2V-C2_845518.csv",
+      "rows": "6748"
+    },
+    {
+      "stage": "raw",
+      "key": "fire_archive_M-C61_845498.csv",
+      "rows": "539793"
+    },
+    {
+      "stage": "raw",
+      "key": "fire_nrt_M-C61_845498.csv",
+      "rows": "3091"
+    },
+    {
+      "stage": "raw",
+      "key": "fire_archive_SV-C2_845493.csv",
+      "rows": "1642993"
+    },
+    {
+      "stage": "raw",
+      "key": "fire_nrt_SV-C2_845493.csv",
+      "rows": "5991"
+    },
+    {
+      "stage": "raw",
+      "key": "fire_archive_SV-C2_846801.csv",
+      "rows": "69639"
+    },
+    {
+      "stage": "clean",
+      "key": "MODIS|pbhr|NRT",
+      "rows": "2993"
+    },
+    {
+      "stage": "clean",
+      "key": "MODIS|pbhr|SP",
+      "rows": "514912"
+    },
+    {
+      "stage": "clean",
+      "key": "N20|pbhr|NRT",
+      "rows": "7393"
+    },
+    {
+      "stage": "clean",
+      "key": "N20|pbhr|SP",
+      "rows": "743674"
+    },
+    {
+      "stage": "clean",
+      "key": "N21|pbhr|NRT",
+      "rows": "6291"
+    },
+    {
+      "stage": "clean",
+      "key": "N21|pbhr|SP",
+      "rows": "195672"
+    },
+    {
+      "stage": "clean",
+      "key": "SNPP|control|SP",
+      "rows": "59345"
+    },
+    {
+      "stage": "clean",
+      "key": "SNPP|pbhr|NRT",
+      "rows": "5684"
+    },
+    {
+      "stage": "clean",
+      "key": "SNPP|pbhr|SP",
+      "rows": "1411016"
+    },
+    {
+      "stage": "clean",
+      "key": "TOTAL hotspots_clean.parquet",
+      "rows": "2946980"
+    }
+  ],
+  "ai_use_note": "AI assistants (Claude, by Anthropic) were used by team members for code assistance, debugging, checking analysis and drafting documentation; team members ran the code and are responsible for all outputs."
+}

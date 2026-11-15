@@ -10,6 +10,8 @@ NASA Space Apps Challenge 2026 · Challenge 9: Harmonization of MODIS and VIIRS 
 
 > **EMBERWISE provides a relative burning activity index for research and historical analysis. It is NOT an official real-time fire alert, fire perimeter map, or emergency response tool.** A hotspot is a thermal detection, not a confirmed fire. No hotspot does not mean no fire.
 
+**Code repository:** https://github.com/sudiksha8639-debug/ThermoWeave
+
 **Live app, backup video and slides:** links are added to the submission form and to this page when deployment finishes (deployment follows the 15:00 code freeze on 15 Nov 2026).
 
 ---
@@ -198,6 +200,7 @@ Failures are shown in the app with a caveat. A visible weakness scores better th
 | `mock-data/hotspots_indian_punjab_<year>.csv`, `hotspots_haryana_<year>.csv` | Raw hotspot rows, 2020 to 2026, day and night |
 | `docs/RAW_FILES.csv` | Every raw file: request ID, rows, dates, SHA-256 |
 | `docs/ROW_AUDIT.csv` | Raw rows versus rows kept after cleaning |
+| `docs/manifest.json` | Machine-readable manifest: raw downloads, SHA-256 hashes, processing parameters, boundary source, AI-use note |
 
 CSV header: `satellite,date,time_utc,local_solar_time,lat,lon,frp,confidence,day_night,product`. The Punjab + Haryana download joins the two files in the browser. 2019 was dropped to stay under the 60 MB budget (total 54.5 MB, largest file 10.7 MB).
 
@@ -209,6 +212,7 @@ Python packages: `polars` plus the packages imported at the top of each script i
 
 ```
 python pipeline\log_raw_files.py        # hashes, row counts, row audit
+python pipeline\make_manifest.py        # docs/manifest.json from the two files above
 python pipeline\ingest.py               # raw CSVs to hotspots_clean.parquet
 python pipeline\tiles.py                # H3 tile-days and tiles
 python pipeline\export_contract.py      # contract files for the analysis stage
