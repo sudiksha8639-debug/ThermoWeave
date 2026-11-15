@@ -4,6 +4,8 @@
 
 *Giving every satellite fire count a clock, so 26 years of MODIS and VIIRS records can be read together and the drift and handovers stay visible.*
 
+![NASA Space Apps 2026](https://img.shields.io/badge/NASA%20Space%20Apps-2026-0b3d91) ![Challenge](https://img.shields.io/badge/Challenge%209-MODIS%20%2B%20VIIRS%20harmonization-orange) ![Data](https://img.shields.io/badge/data-NASA%20FIRMS-red) ![Backend](https://img.shields.io/badge/backend-none%20(static%20files)-lightgrey) ![Offline](https://img.shields.io/badge/works-offline-brightgreen) ![Licence](https://img.shields.io/badge/licence-MIT-blue)
+
 NASA Space Apps Challenge 2026 · Challenge 9: Harmonization of MODIS and VIIRS Hot Spots
 
 > **EMBERWISE provides a relative burning activity index for research and historical analysis. It is NOT an official real-time fire alert, fire perimeter map, or emergency response tool.** A hotspot is a thermal detection, not a confirmed fire. No hotspot does not mean no fire.
@@ -11,6 +13,49 @@ NASA Space Apps Challenge 2026 · Challenge 9: Harmonization of MODIS and VIIRS 
 **Live app, backup video and slides:** links are added to the submission form and to this page when deployment finishes (deployment follows the 15:00 code freeze on 15 Nov 2026).
 
 ---
+
+## At a glance
+
+| | |
+|---|---|
+| Record length | Nov 2000 to Nov 2026 (about 26 years) |
+| Satellites | 5: Terra, Aqua (MODIS) and Suomi NPP, NOAA-20, NOAA-21 (VIIRS) |
+| Hotspot rows processed | 3,342,822 raw rows in the Punjab and Haryana download box |
+| Study area | Punjab and Haryana, India (clipped to state boundaries) |
+| Counting unit | H3 resolution-6 tile-day (about 36 km²) |
+| Handover | Suomi NPP (stopped 2 Nov 2026) to NOAA-20, Provisional |
+| Stack | Python pipeline, static JSON, React and TypeScript, no backend |
+
+```mermaid
+pie showData title Raw hotspot rows by satellite (3.34 million)
+    "Suomi NPP" : 1648984
+    "NOAA-20" : 892803
+    "MODIS (Terra + Aqua)" : 542884
+    "NOAA-21" : 258151
+```
+
+## What it does
+
+**Explore**
+- **Area picker and date range.** Three presets (Indian Punjab, Haryana, Punjab + Haryana) plus a lat/long box inside the loaded regions.
+- **Year-by-month calendar** with a plain hotspot-count view beside the harmonized view.
+- **Harmonized series** with a range ribbon, with the raw MODIS and VIIRS lines kept visible.
+- **Hex map** of burning tile-days (Canvas, H3 tiles), with click-to-inspect.
+- **Sensor-mode switch:** MODIS, VIIRS, naive splice or harmonized.
+- **This-month card** comparing the month with the same month in other years, with a fair rule for a month still in progress (presets only).
+- **Local Normal badge, critical periods and a plain-language sentence** describing what the data show.
+- **Era banner and trust score** (0 to 100 per tile-month) so every number says how much to trust it.
+
+**See the problem and the proof**
+- **Phantom Surge:** the naive MODIS-to-VIIRS splice shown next to the harmonized line, so the 2012 jump is visible.
+- **Fire Clock Dial and drift chart:** when each satellite looked, and how Terra and Aqua drifted.
+- **Relay timeline and Sensor-Loss toggle:** drop Suomi NPP on the current season and see the percent shift when NOAA-20 takes over.
+- **Transparency Lab:** hide-a-year test, baselines, seam check, ratio stability, resolution 5/6/7 sensitivity, saturation flag (fraction of tiles burning shown beside tile-days), and weak-zone panels. Failures are shown with a caveat.
+
+**Take it with you**
+- **CSV downloads:** monthly tile rows and raw hotspot files per preset and year (day and night, local solar date).
+- **Shareable permalink**, **offline installable PWA**, text-table alternatives to charts, a colour-safe palette and keyboard access.
+- **Methods, How to read, Limits and Provenance pages**, and a safety disclaimer on every screen.
 
 ## 1. Why this exists
 
@@ -37,6 +82,39 @@ Suomi NPP also stopped delivering on 2 Nov 2026 (the last row in our data is dat
 - **Local solar time.** `local_hours = UTC hours + longitude / 15`; `local_date = UTC date + floor(local_hours / 24)`. All dates in the app and CSVs are local solar dates.
 - **Scope.** Punjab and Haryana clipped to state boundary polygons; a tile is in scope if its centroid is inside.
 
+### Timeline of satellites and eras
+
+```mermaid
+gantt
+    title Satellite coverage and eras (Punjab and Haryana download)
+    dateFormat YYYY-MM-DD
+    axisFormat %Y
+    section Eras
+    A Terra only (Indicative)       :2000-11-01, 2002-06-30
+    B Terra and Aqua (Estimated)    :2002-07-01, 2011-12-31
+    C Suomi NPP VIIRS (Measured)    :2012-01-20, 2026-11-02
+    D Relay satellite (Provisional) :2026-11-03, 2026-11-05
+    section Satellites
+    Terra (MODIS)                   :2000-11-01, 2026-11-05
+    Aqua (MODIS)                    :2002-07-01, 2026-11-05
+    Suomi NPP                       :2012-01-20, 2026-11-02
+    NOAA-20                         :2018-04-01, 2026-11-05
+    NOAA-21                         :2023-03-01, 2026-11-05
+```
+
+### From raw data to the app
+
+```mermaid
+flowchart LR
+    A[NASA FIRMS archives<br/>MODIS, Suomi NPP, NOAA-20, NOAA-21] --> B[Clip to state polygons<br/>clean and static-source mask]
+    B --> C[Local solar time and date]
+    C --> D[H3 resolution-6 tile-days]
+    D --> E[Learn MODIS to VIIRS ratio<br/>zone and month, 2012 to 2019]
+    E --> F[Harmonized series<br/>range and trust score]
+    F --> G[Static JSON and CSV files]
+    G --> H[Offline web app<br/>map, calendar, Fire Clock, Lab]
+```
+
 ### Architecture and stack
 
 - **No backend.** Heavy work runs once in Python and writes small pre-aggregated JSON files (chart data budget under 8 MB per region). The site only reads those files and works offline after first load.
@@ -53,11 +131,26 @@ The dial shows the local hour at which each satellite looked. It does **not** ch
 
 **Orbit drift (data).** Terra and Aqua held their local viewing times through about 2021, then shifted. Terra's median local hour falls from about 10.9 to about 9.25 by 2026; Aqua's rises from about 13.3 to about 15.3; the VIIRS satellites stay near 13.1 to 13.3. MODIS after about 2022 therefore cannot be compared with earlier MODIS. The VIIRS/MODIS ratio for Punjab + Haryana in Oct to Nov falls from about 2.53 in 2012 to about 1.43 in 2025, and Terra's Oct to Nov tile-days fall from about 1,200 in 2012 to about 16 in 2025. We show this and do not state a cause.
 
+| Satellite | Median local hour, early years | Median local hour, 2026 |
+|---|---|---|
+| Terra (MODIS) | about 10.9 | about 9.25 (earlier) |
+| Aqua (MODIS) | about 13.3 | about 15.3 (later) |
+| Suomi NPP, NOAA-20, NOAA-21 (VIIRS) | about 13.1 to 13.3 | about 13.1 to 13.3 (steady) |
+
 **Handover to NOAA-20.**
 
 - NOAA-20 is the relay, marked Provisional. It looks at about 13:09 local time on average (13.15 h) against a 13:30 target. NOAA-21 is only about a minute and a half further off, so the choice is close. NOAA-20 has 8 shared seasons with Suomi NPP; NOAA-21 has 3.
 - Pretending Suomi NPP stopped and rebuilding a season from NOAA-20 alone: the 2025 season came out about 2 to 3% above what Suomi NPP saw, with day-by-day agreement of 0.986 (pass mark 0.85). The 2021 season, held out, came out about 3% below, but day-by-day agreement was 0.81, under the pass mark. Season totals are sound; single days are looser.
 - Switching to NOAA-20 changes a season's total by about 2 to 3%.
+
+```mermaid
+flowchart TD
+    S[Suomi NPP last data<br/>2 Nov 2026] --> Q{Which NOAA satellite?}
+    Q -->|8 shared seasons, mean 13.15 h| N20[NOAA-20 chosen<br/>Provisional]
+    Q -->|3 shared seasons, slightly further from 13:30| N21[NOAA-21 not chosen]
+    N20 --> T[Aligned to Suomi NPP<br/>per zone and month]
+    T --> R[Season totals shift by about 2 to 3 percent]
+```
 
 **Peak-season overshoot.** In Indian Punjab, on the 85 busiest days of 2012 to 2019, the straight ratio is off by about 61% per day and overpredicts. It even predicts more tiles burning than exist (1.47 against a limit of 1), which is why the index is capped. A curved alternative does better (about 40% error) but underpredicts. Peak days before 2012 are therefore upper-end estimates. Haryana and the combined region never pass the half-the-tiles mark in those years.
 
