@@ -6,6 +6,7 @@ import {
   loadManifest,
   loadRegionDaily,
   loadRegions,
+  loadRelaySim,
   loadTileGeometry,
   loadTileMonth,
 } from '../data';
@@ -30,6 +31,9 @@ import { FireClockDialSlot } from '../components/FireClockDial';
 import { CsvPanel } from '../components/CsvPanel';
 import { InspectPanel } from '../components/InspectPanel';
 import { ThisMonthCard } from '../components/ThisMonthCard';
+import { BurnCalendar } from '../components/Calendar';
+import { RelayTimeline } from '../components/RelayTimeline';
+import { aggregateTileMonths } from '../lib/derive';
 import { LabelChip } from '../components/LabelChip';
 import { Stat } from '../components/primitives';
 import { LINE, viridis } from '../theme';
@@ -57,6 +61,7 @@ export function Workspace() {
   const climQ = useData(loadClimatology, []);
   const hourlyQ = useData(loadHourly, []);
   const manifestQ = useData(loadManifest, []);
+  const relayQ = useData(loadRelaySim, []);
 
   const years = useMemo(() => {
     const ys = new Set<number>();
@@ -170,6 +175,17 @@ export function Workspace() {
   };
 
   const fileList = useMemo(() => [...files.values()], [files]);
+
+  // Calendar aggregates: res-6 tile rows inside the selected region.
+  const regionScope6 = useMemo(() => {
+    const list = region?.tiles_in_scope?.['6'];
+    return list && list.length ? new Set(list) : null;
+  }, [region]);
+  const monthlyAgg = useMemo(
+    () => aggregateTileMonths(fileList, regionScope6),
+    [fileList, regionScope6]
+  );
+
   const columns = fileList[0]?.columns ?? [];
   const valueCol: TmCol = SENSOR_MODES.find((s) => s.id === sensor)?.column ?? 'harm';
 
@@ -566,7 +582,29 @@ export function Workspace() {
       />
 
       {/* SLOT: teammate series chart */}
-      <SeriesChartSlot rows={dailyRows} title={`Daily harmonized burning tile-days — ${region?.label ?? regionId}`} />
+      <SeriesChartSlot
+        rows={dailyRows}
+        title={`Daily harmonized burning tile-days — ${region?.label ?? regionId}`}
+        caption="Range of yearly ratios, widened by tested error; not a confidence interval. Shaded bands mark the sensor eras; gaps in the line are days without a usable observation."
+      />
+
+      <BurnCalendar
+        months={monthlyAgg}
+        selectedYm={clampedSelected}
+        onPick={(ym) => setSelectedYm(ym)}
+        regionLabel={region?.label ?? regionId}
+        eras={eras}
+        loading={filesLoading}
+        error={filesError}
+        onRetry={() => setFilesTick((t) => t + 1)}
+      />
+
+      <RelayTimeline
+        sim={relayQ.data}
+        loading={relayQ.loading}
+        error={relayQ.error}
+        onRetry={relayQ.retry}
+      />
 
       <RegionCompare
         rows={dailyQ.data?.rows ?? []}

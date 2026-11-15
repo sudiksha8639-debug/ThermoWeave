@@ -9,6 +9,8 @@ import {
 } from '../types';
 import { LabelChip } from './LabelChip';
 import { SaturationFlag } from './SaturationFlag';
+import { Meter } from './primitives';
+import { trustScore } from '../lib/derive';
 import type { InspectTarget } from '../state';
 
 interface Props {
@@ -56,6 +58,12 @@ export function InspectPanel({ target, rowsForYm, columns, geometry, valueCol, r
   const lo = row ? tmNum(row, columns, 'lo') : null;
   const hi = row ? tmNum(row, columns, 'hi') : null;
   const frac = row ? tmNum(row, columns, 'frac_burning') : null;
+  const harm = row ? tmNum(row, columns, 'harm') : null;
+  const scoreLabel =
+    typeof trust === 'string' && trust.toLowerCase().includes('relay')
+      ? 'Provisional'
+      : (regionTrust ?? null);
+  const score = trustScore(valueCol === 'harm' ? harm : tmNum(row ?? [], columns, valueCol), lo, hi, scoreLabel);
   void valueCol;
 
   return (
@@ -126,6 +134,22 @@ export function InspectPanel({ target, rowsForYm, columns, geometry, valueCol, r
             </span>
           )}
           <SaturationFlag fracBuring={frac} />
+        </div>
+      )}
+      {row && score && (
+        <div className="mt-2 border-t border-line/60 pt-2" title={score.note}>
+          <div className="mb-1 flex items-baseline justify-between gap-2 text-[10.5px] text-ink-dim">
+            <span>Trust score</span>
+            <span className="font-mono text-ink">
+              {score.score}/100
+              <span className="ml-1 text-[9px] text-ink-dim">era ×{score.eraFactor}</span>
+            </span>
+          </div>
+          <Meter value={score.score} tone={score.score >= 66 ? 'teal' : score.score >= 33 ? 'ember' : 'blue'} />
+          <p className="mt-1 text-[9.5px] leading-snug text-ink-dim">
+            Band width {score.bandWidthPct.toFixed(0)}% of the value · score per tile-month, not a
+            probability.
+          </p>
         </div>
       )}
     </aside>

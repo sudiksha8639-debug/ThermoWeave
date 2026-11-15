@@ -1,5 +1,9 @@
+import { useMemo } from 'react';
 import { ERAS } from '../types';
 import { LabelChip } from '../components/LabelChip';
+import { PhantomSurge } from '../components/PhantomSurge';
+import { loadRegionDaily, loadRegions } from '../data';
+import { useData } from '../hooks';
 import { useApp } from '../state';
 
 const TRUST_DOT: Record<string, string> = {
@@ -11,6 +15,14 @@ const TRUST_DOT: Record<string, string> = {
 
 export function Story() {
   const { go } = useApp();
+  const dailyQ = useData(loadRegionDaily, []);
+  const regionsQ = useData(loadRegions, []);
+  const region = regionsQ.data?.regions.find((r) => r.id === 'punjab_haryana');
+  const rows = useMemo(
+    () => (dailyQ.data?.rows ?? []).filter((r) => r.region === 'punjab_haryana'),
+    [dailyQ.data]
+  );
+
   return (
     <article className="rise space-y-4 sm:space-y-6">
       <section className="card relative overflow-hidden p-6 sm:p-10 lg:px-12 lg:py-14">
@@ -64,6 +76,14 @@ export function Story() {
           </dl>
         </div>
       </section>
+
+      <PhantomSurge
+        rows={rows}
+        loading={dailyQ.loading || regionsQ.loading}
+        error={dailyQ.error}
+        onRetry={dailyQ.retry}
+        regionLabel={region?.label ?? 'Punjab + Haryana'}
+      />
 
       <div className="grid gap-4 sm:gap-6 lg:grid-cols-5">
         <section className="card p-6 sm:p-8 lg:col-span-3">
@@ -172,11 +192,24 @@ export function Story() {
               <circle cx="12" cy="17" r="0.9" fill="currentColor" />
             </svg>
           </span>
-          <p className="max-w-4xl text-xs leading-relaxed text-amber-200/90 sm:text-[12.5px]">
-            Not an official fire alert, perimeter map or emergency tool. Missing data is shown as
-            a gap, never as zero. The Fire Clock Dial is a transparency diagnostic: satellites
-            only look at these times — it shows when we looked, not the full daily fire cycle.
-          </p>
+          <div className="flex-1">
+            <p className="max-w-4xl text-xs leading-relaxed text-amber-200/90 sm:text-[12.5px]">
+              Not an official fire alert, perimeter map or emergency tool. Missing data is shown as
+              a gap, never as zero. The Fire Clock Dial is a transparency diagnostic: satellites
+              only look at these times — it shows when we looked, not the full daily fire cycle.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button onClick={() => go('workspace')} className="btn btn-ghost btn-sm">
+                Open the calendar &amp; map
+              </button>
+              <button onClick={() => go('proof')} className="btn btn-ghost btn-sm">
+                See the transparency lab
+              </button>
+              <button onClick={() => go('methods')} className="btn btn-ghost btn-sm">
+                Read methods, limits &amp; provenance
+              </button>
+            </div>
+          </div>
         </div>
       </section>
     </article>

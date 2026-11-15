@@ -3,6 +3,7 @@ import { AppProvider, useApp } from './state';
 import { Story } from './screens/Story';
 import { Workspace } from './screens/Workspace';
 import { Proof } from './screens/Proof';
+import { Docs } from './screens/Docs';
 import { DataSourcesPanel } from './components/DataSourcesPanel';
 import { ConnectionBadge } from './components/CacheControls';
 
@@ -10,6 +11,7 @@ const NAV = [
   { id: 'story', label: 'Story' },
   { id: 'workspace', label: 'Workspace' },
   { id: 'proof', label: 'Proof / Lab' },
+  { id: 'methods', label: 'Methods' },
 ] as const;
 
 function Brand({ onClick }: { onClick: () => void }) {
@@ -107,6 +109,7 @@ function Shell() {
         {screen === 'story' && <Story />}
         {screen === 'workspace' && <Workspace />}
         {screen === 'proof' && <Proof />}
+        {screen === 'methods' && <Docs />}
       </main>
 
       <footer className="mt-4 border-t border-line/70 bg-surface/60">
