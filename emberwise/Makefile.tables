@@ -1,0 +1,24 @@
+# M3 tables. On Windows (no make) run the python commands in README_TABLES.md instead.
+PY ?= python
+
+.PHONY: tables mocks check size schema test-tables
+
+tables:        ## build every web table from data/processed, then check contract and size
+	$(PY) -m pipeline.tables.build_tables
+	$(PY) -m pipeline.tables.check_contract
+	$(PY) -m pipeline.tables.size_report
+
+mocks:         ## write mock hand-offs and mock tables (never overwrites a real file)
+	$(PY) -m pipeline.tables.make_mocks
+
+check:
+	$(PY) -m pipeline.tables.check_contract
+
+size:
+	$(PY) -m pipeline.tables.size_report
+
+schema:        ## regenerate docs/schema.md from the contract
+	$(PY) -m pipeline.tables.gen_schema_md
+
+test-tables:
+	$(PY) -m pytest -q

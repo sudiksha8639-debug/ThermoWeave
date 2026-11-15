@@ -1,7 +1,7 @@
 // Minimal hash router: #/story | #/workspace | #/proof with query params.
 // Permalink params live in the hash so static hosting needs no rewrites.
 
-export type Screen = 'story' | 'workspace' | 'proof';
+export type Screen = 'story' | 'workspace' | 'proof' | 'methods';
 
 export interface Route {
   screen: Screen;
@@ -11,7 +11,8 @@ export interface Route {
 export function parseHash(hash: string): Route {
   const h = hash.replace(/^#\/?/, '');
   const [path, qs] = h.split('?');
-  const screen: Screen = path === 'workspace' || path === 'proof' ? path : 'story';
+  const screen: Screen =
+    path === 'workspace' || path === 'proof' || path === 'methods' ? path : 'story';
   return { screen, params: new URLSearchParams(qs ?? '') };
 }
 

@@ -5,12 +5,16 @@ import { useApp } from '../state';
 import { ymToLabel } from '../types';
 
 interface Props {
-  tiles: TileGeometry[]; // res-6 tiles in scope for the region
+  tiles: TileGeometry[]; // tiles in scope for the region at the chosen res
   tileMonth: TileMonthFile | null; // loaded year file containing selectedYm
   columns: string[];
   valueCol: TmCol;
   selectedYm: number;
   minValue?: number; // tiles below this are drawn as gaps
+  /** Optional draw-polygon mode (stretch feature). */
+  drawPolygon?: boolean;
+  onPolygonComplete?: (lonLat: [number, number][]) => void;
+  polygonPoints?: [number, number][] | null;
 }
 
 interface ProjTile {
@@ -18,15 +22,72 @@ interface ProjTile {
   cx: number;
   cy: number;
   pts: Float32Array; // flattened projected vertices
+  path: Path2D; // cached geometry — colours change per month, shapes don't
 }
 
-export function HexMap({ tiles, tileMonth, columns, valueCol, selectedYm, minValue = 0 }: Props) {
+// Uniform-grid spatial index over projected tiles for O(1)-ish hit testing.
+class TileGrid {
+  private cells = new Map<string, ProjTile[]>();
+  private cell: number;
+  private minX = Infinity;
+  private minY = Infinity;
+
+  constructor(tiles: ProjTile[], w: number, h: number) {
+    this.cell = Math.max(12, Math.sqrt((w * h) / Math.max(1, tiles.length)));
+    for (const t of tiles) {
+      if (t.cx < this.minX) this.minX = t.cx;
+      if (t.cy < this.minY) this.minY = t.cy;
+      const k = this.key(t.cx, t.cy);
+      const arr = this.cells.get(k);
+      if (arr) arr.push(t);
+      else this.cells.set(k, [t]);
+    }
+  }
+
+  private key(x: number, y: number): string {
+    return `${Math.floor((x - this.minX) / this.cell)},${Math.floor((y - this.minY) / this.cell)}`;
+  }
+
+  /** Tiles whose centre lies within `radius` px of (x, y). */
+  query(x: number, y: number, radius: number): ProjTile[] {
+    const out: ProjTile[] = [];
+    const r = radius + this.cell; // centres may sit in neighbouring cells
+    const x0 = Math.floor((x - r - this.minX) / this.cell);
+    const x1 = Math.floor((x + r - this.minX) / this.cell);
+    const y0 = Math.floor((y - r - this.minY) / this.cell);
+    const y1 = Math.floor((y + r - this.minY) / this.cell);
+    for (let ix = x0; ix <= x1; ix++) {
+      for (let iy = y0; iy <= y1; iy++) {
+        const arr = this.cells.get(`${ix},${iy}`);
+        if (arr) out.push(...arr);
+      }
+    }
+    return out;
+  }
+}
+
+export function HexMap({
+  tiles,
+  tileMonth,
+  columns,
+  valueCol,
+  selectedYm,
+  minValue = 0,
+  drawPolygon = false,
+  onPolygonComplete,
+  polygonPoints = null,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const drag = useRef<{ x0: number; y0: number; x1: number; y1: number; moved: boolean } | null>(null);
   const [dragBox, setDragBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
-  const { selectedTiles, setSelectedTiles, setInspected, sensor } = useApp();
+  const polyDraft = useRef<[number, number][] | null>(null); // lon/lat draft points
+  const [polyScreen, setPolyScreen] = useState<[number, number][] | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const frameEma = useRef<number | null>(null);
+  const lastLog = useRef(-Infinity);
+  const { selectedTiles, setSelectedTiles, setInspected, sensor, inspected } = useApp();
 
   // month rows keyed by tile index for the selected month
   const monthRows = useMemo(() => {
@@ -73,27 +134,44 @@ export function HexMap({ tiles, tileMonth, columns, valueCol, selectedYm, minVal
     };
   }, [tiles]);
 
-  const projected = useMemo<ProjTile[]>(() => {
-    if (!proj || size.w === 0) return [];
+  const fit = useMemo(() => {
+    if (!proj || size.w === 0) return null;
     const pad = 14;
     const bw = proj.maxX - proj.minX || 1e-6;
     const bh = proj.maxY - proj.minY || 1e-6;
     const scale = Math.min((size.w - pad * 2) / bw, (size.h - pad * 2) / bh);
     const ox = (size.w - bw * scale) / 2 - proj.minX * scale;
     const oy = (size.h - bh * scale) / 2 - proj.minY * scale;
+    return { scale, ox, oy, pad };
+  }, [proj, size]);
+
+  const projected = useMemo<ProjTile[]>(() => {
+    if (!proj || !fit) return [];
+    const { scale, ox, oy } = fit;
     return tiles.map((g) => {
       const pts = new Float32Array(g.vertices.length * 2);
+      const path = new Path2D();
       let sx = 0, sy = 0;
       for (let i = 0; i < g.vertices.length; i++) {
         const [x, y] = proj.toXY(g.vertices[i][0], g.vertices[i][1]);
-        pts[i * 2] = x * scale + ox;
-        pts[i * 2 + 1] = y * scale + oy;
-        sx += pts[i * 2]; sy += pts[i * 2 + 1];
+        const px = x * scale + ox;
+        const py = y * scale + oy;
+        pts[i * 2] = px;
+        pts[i * 2 + 1] = py;
+        if (i === 0) path.moveTo(px, py);
+        else path.lineTo(px, py);
+        sx += px; sy += py;
       }
+      path.closePath();
       const n = g.vertices.length;
-      return { g, cx: sx / n, cy: sy / n, pts };
+      return { g, cx: sx / n, cy: sy / n, pts, path };
     });
-  }, [tiles, proj, size]);
+  }, [tiles, proj, fit]);
+
+  const grid = useMemo(
+    () => (size.w > 0 ? new TileGrid(projected, size.w, size.h) : null),
+    [projected, size]
+  );
 
   // resize observer
   useEffect(() => {
@@ -108,11 +186,14 @@ export function HexMap({ tiles, tileMonth, columns, valueCol, selectedYm, minVal
   }, []);
 
   const draw = useCallback(() => {
+    const t0 = performance.now();
     const canvas = canvasRef.current;
     if (!canvas || projected.length === 0) return;
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = size.w * dpr;
-    canvas.height = size.h * dpr;
+    if (canvas.width !== Math.round(size.w * dpr) || canvas.height !== Math.round(size.h * dpr)) {
+      canvas.width = Math.round(size.w * dpr);
+      canvas.height = Math.round(size.h * dpr);
+    }
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -128,16 +209,12 @@ export function HexMap({ tiles, tileMonth, columns, valueCol, selectedYm, minVal
       else if (v === 0) fill = NO_DATA_COLOR;
       else fill = viridis(Math.min(1, Math.sqrt(v) / sqrtScale));
 
-      ctx.beginPath();
-      ctx.moveTo(t.pts[0], t.pts[1]);
-      for (let i = 1; i < t.pts.length / 2; i++) ctx.lineTo(t.pts[i * 2], t.pts[i * 2 + 1]);
-      ctx.closePath();
       ctx.fillStyle = fill;
-      ctx.fill();
+      ctx.fill(t.path);
       if (isSelected(t.g.index)) {
         ctx.strokeStyle = '#5ec8c0';
         ctx.lineWidth = 1.5;
-        ctx.stroke();
+        ctx.stroke(t.path);
       }
     }
 
@@ -154,24 +231,112 @@ export function HexMap({ tiles, tileMonth, columns, valueCol, selectedYm, minVal
       );
       ctx.setLineDash([]);
     }
-  }, [projected, valueOf, maxV, selectedTiles, dragBox, size, minValue]);
 
+    // committed polygon (lon/lat → screen)
+    if (polygonPoints && polygonPoints.length >= 3 && proj && fit) {
+      ctx.strokeStyle = '#5ec8c0';
+      ctx.fillStyle = 'rgba(94,200,192,0.12)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      polygonPoints.forEach(([lon, lat], i) => {
+        const [x, y] = proj.toXY(lon, lat);
+        const px = x * fit.scale + fit.ox;
+        const py = y * fit.scale + fit.oy;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      for (const [lon, lat] of polygonPoints) {
+        const [X, Y] = proj.toXY(lon, lat);
+        ctx.beginPath();
+        ctx.arc(X * fit.scale + fit.ox, Y * fit.scale + fit.oy, 3, 0, Math.PI * 2);
+        ctx.fillStyle = '#5ec8c0';
+        ctx.fill();
+      }
+    }
+    // in-progress polygon draft (screen coords)
+    if (polyScreen && polyScreen.length >= 2) {
+      ctx.strokeStyle = '#5ec8c0';
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      polyScreen.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    const ms = performance.now() - t0;
+    frameEma.current = frameEma.current === null ? ms : frameEma.current * 0.9 + ms * 0.1;
+    const now = performance.now();
+    if (now - lastLog.current > 2000) {
+      lastLog.current = now;
+      console.info(
+        `[EMBERWISE] HexMap draw: ${projected.length.toLocaleString()} tiles, ~${frameEma.current.toFixed(1)} ms/frame (ema)`
+      );
+    }
+  }, [projected, valueOf, maxV, selectedTiles, dragBox, size, minValue, polygonPoints, polyScreen, proj, fit]);
+
+  // draw on change, coalesced through requestAnimationFrame
   useEffect(() => {
-    draw();
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      draw();
+    });
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
   }, [draw]);
 
-  const toLocal = (e: React.PointerEvent) => {
+  // Leaving draw mode always discards any unfinished draft.
+  useEffect(() => {
+    if (!drawPolygon) {
+      polyDraft.current = null;
+      setPolyScreen(null);
+    }
+  }, [drawPolygon]);
+
+  const toLocal = (e: React.PointerEvent | React.MouseEvent) => {
     const r = canvasRef.current!.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
 
+  const screenToLonLat = (px: number, py: number): [number, number] | null => {
+    if (!proj || !fit) return null;
+    const xProj = (px - fit.ox) / fit.scale;
+    const yProj = (py - fit.oy) / fit.scale;
+    return [xProj / proj.kx, yProj];
+  };
+
+  const hitTile = (x: number, y: number): ProjTile | null => {
+    const candidates = grid ? grid.query(x, y, 40) : projected;
+    let best: ProjTile | null = null;
+    let bd = Infinity;
+    for (const t of candidates) {
+      const dd = (t.cx - x) ** 2 + (t.cy - y) ** 2;
+      if (dd < bd) { bd = dd; best = t; }
+    }
+    return best && bd < 40 * 40 ? best : null;
+  };
+
   const onDown = (e: React.PointerEvent) => {
+    if (drawPolygon) {
+      const { x, y } = toLocal(e);
+      const ll = screenToLonLat(x, y);
+      if (ll) {
+        polyDraft.current = [...(polyDraft.current ?? []), ll];
+        setPolyScreen([...(polyScreen ?? []), [x, y]]);
+      }
+      return;
+    }
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     const { x, y } = toLocal(e);
     drag.current = { x0: x, y0: y, x1: x, y1: y, moved: false };
   };
 
   const onMove = (e: React.PointerEvent) => {
+    if (drawPolygon) return;
     const d = drag.current;
     if (!d) return;
     const { x, y } = toLocal(e);
@@ -180,34 +345,30 @@ export function HexMap({ tiles, tileMonth, columns, valueCol, selectedYm, minVal
     setDragBox(d.moved ? { x0: d.x0, y0: d.y0, x1: x, y1: y } : null);
   };
 
+  const finishPolygon = useCallback(() => {
+    const pts = polyDraft.current;
+    polyDraft.current = null;
+    setPolyScreen(null);
+    if (pts && pts.length >= 3 && onPolygonComplete) onPolygonComplete(pts);
+  }, [onPolygonComplete]);
+
   const onUp = (e: React.PointerEvent) => {
+    if (drawPolygon) return; // points accumulate on pointerdown; dblclick finishes
     const d = drag.current;
     drag.current = null;
     setDragBox(null);
     if (!d) return;
     const { x, y } = toLocal(e);
     if (!d.moved) {
-      // click → inspect nearest tile
-      let best: ProjTile | null = null;
-      let bd = Infinity;
-      for (const t of projected) {
-        const dd = (t.cx - x) ** 2 + (t.cy - y) ** 2;
-        if (dd < bd) { bd = dd; best = t; }
-      }
-      if (best && bd < 40 * 40) setInspected({ tile: best.g.index, ym: selectedYm });
+      const best = hitTile(x, y);
+      if (best) setInspected({ tile: best.g.index, ym: selectedYm });
       else setInspected(null);
       return;
     }
     // drag → rectangle selection in lon/lat space
-    if (!proj) return;
-    const pad = 14;
-    const bw = proj.maxX - proj.minX || 1e-6;
-    const bh = proj.maxY - proj.minY || 1e-6;
-    const scale = Math.min((size.w - pad * 2) / bw, (size.h - pad * 2) / bh);
-    const ox = (size.w - bw * scale) / 2 - proj.minX * scale;
-    const oy = (size.h - bh * scale) / 2 - proj.minY * scale;
-    const xToLon = (px: number) => (px - ox) / scale / proj.kx;
-    const yToLat = (py: number) => (py - oy) / scale;
+    if (!proj || !fit) return;
+    const xToLon = (px: number) => (px - fit.ox) / fit.scale / proj.kx;
+    const yToLat = (py: number) => (py - fit.oy) / fit.scale;
     const x0 = xToLon(Math.min(d.x0, x)), x1 = xToLon(Math.max(d.x0, x));
     const y0 = yToLat(Math.min(d.y0, y)), y1 = yToLat(Math.max(d.y0, y));
     const sel = new Set<number>();
@@ -219,6 +380,37 @@ export function HexMap({ tiles, tileMonth, columns, valueCol, selectedYm, minVal
     setInspected(null);
   };
 
+  const onDoubleClick = () => {
+    if (drawPolygon) finishPolygon();
+  };
+
+  // keyboard navigation: arrow keys cycle tiles with data (sorted by index),
+  // Enter inspects, Escape clears. Canvas is focusable (tabIndex=0).
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (drawPolygon) {
+      if (e.key === 'Escape') {
+        polyDraft.current = null;
+        setPolyScreen(null);
+      }
+      return;
+    }
+    const ordered = orderedTiles(projected, valueOf);
+    if (ordered.length === 0) return;
+    const cur = inspectedTileIndex(ordered, inspected?.tile);
+    let next = -1;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (cur + 1) % ordered.length;
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (cur - 1 + ordered.length) % ordered.length;
+    else if (e.key === 'Enter' && cur >= 0) {
+      setInspected({ tile: ordered[cur].g.index, ym: selectedYm });
+      return;
+    } else if (e.key === 'Escape') {
+      setInspected(null);
+      return;
+    } else return;
+    e.preventDefault();
+    setInspected({ tile: ordered[next].g.index, ym: selectedYm });
+  };
+
   const monthLabel = ymToLabel(selectedYm);
   const shown = valueOf.size;
 
@@ -227,16 +419,24 @@ export function HexMap({ tiles, tileMonth, columns, valueCol, selectedYm, minVal
       <canvas
         ref={canvasRef}
         style={{ width: size.w, height: size.h }}
-        className="cursor-crosshair"
+        className={`cursor-crosshair ${drawPolygon ? 'cursor-cell' : ''}`}
         onPointerDown={onDown}
         onPointerMove={onMove}
         onPointerUp={onUp}
-        role="img"
-        aria-label={`Hex map of burning tile-days for ${monthLabel}, sensor mode ${sensor}`}
+        onDoubleClick={onDoubleClick}
+        onKeyDown={onKeyDown}
+        tabIndex={0}
+        role="application"
+        aria-label={
+          drawPolygon
+            ? 'Polygon drawing mode: click to add vertices, double-click or press Enter to finish, Escape to cancel'
+            : `Hex map of burning tile-days for ${monthLabel}, sensor mode ${sensor}. Arrow keys move between tiles, Enter inspects.`
+        }
       />
       <div className="pointer-events-none absolute left-2 top-2 rounded bg-surface/80 px-2 py-1 text-[11px] text-ink-dim">
         {monthLabel} · {shown.toLocaleString()} tiles with data
         {selectedTiles && ` · ${selectedTiles.size.toLocaleString()} selected`}
+        {drawPolygon && ' · click points, double-click to close'}
       </div>
       {tiles.length === 0 && (
         <div className="absolute inset-0 flex items-center justify-center text-sm text-ink-dim">
@@ -245,4 +445,16 @@ export function HexMap({ tiles, tileMonth, columns, valueCol, selectedYm, minVal
       )}
     </div>
   );
+}
+
+// Tiles ordered for keyboard navigation: tiles with data, sorted by index.
+function orderedTiles(projected: ProjTile[], valueOf: Map<number, number | null>): ProjTile[] {
+  return projected
+    .filter((t) => valueOf.has(t.g.index))
+    .sort((a, b) => a.g.index - b.g.index);
+}
+
+function inspectedTileIndex(ordered: ProjTile[], tile: number | undefined): number {
+  if (tile === undefined) return -1;
+  return ordered.findIndex((t) => t.g.index === tile);
 }
