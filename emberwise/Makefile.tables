@@ -1,25 +1,15 @@
-# EMBERWISE M3 targets. Include from the root Makefile (M1 owns it):  include Makefile.tables
-# One command for M3's work:  make tables
-PY ?= python3
-HANDOFF = data/processed/tile_day.parquet   # mock hand-off; ignored when ../data/processed has M1's real files
+# M3 tables. On Windows (no make) run the python commands in README_TABLES.md instead.
+PY ?= python
 
-.PHONY: tables mocks schema check size test-tables
+.PHONY: tables mocks check size schema test-tables
 
-# Until M1/M2 hand off real files, the hand-offs are mocks. Real files in place => same command.
-$(HANDOFF):
-	$(PY) -m pipeline.tables.make_mocks
-
-mocks:
-	$(PY) -m pipeline.tables.make_mocks
-
-tables: $(HANDOFF)
+tables:        ## build every web table from data/processed, then check contract and size
 	$(PY) -m pipeline.tables.build_tables
-	$(PY) -m pipeline.tables.gen_schema_md
 	$(PY) -m pipeline.tables.check_contract
 	$(PY) -m pipeline.tables.size_report
 
-schema:
-	$(PY) -m pipeline.tables.gen_schema_md
+mocks:         ## write mock hand-offs and mock tables (never overwrites a real file)
+	$(PY) -m pipeline.tables.make_mocks
 
 check:
 	$(PY) -m pipeline.tables.check_contract
@@ -27,5 +17,8 @@ check:
 size:
 	$(PY) -m pipeline.tables.size_report
 
-test-tables: tables
-	$(PY) -m pytest -q tests
+schema:        ## regenerate docs/schema.md from the contract
+	$(PY) -m pipeline.tables.gen_schema_md
+
+test-tables:
+	$(PY) -m pytest -q

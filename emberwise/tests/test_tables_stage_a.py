@@ -1,5 +1,5 @@
-"""Stage A tests: the mock hand-offs and the tables built from them satisfy the contract
-and show the features the plan asks for. conftest.py builds a private mock tree first, so real data in the repo is never touched."""
+"""Stage A tests: the mock hand-offs and the tables built from them satisfy the contract and
+show the features the plan asks for. conftest.py builds a private mock tree first."""
 import json
 import shutil
 
@@ -13,13 +13,15 @@ from pipeline.tables.contracts import (CONTRACTS, PARQUET, find_banned, validate
                                        validate_tree)
 from pipeline.tables.harmonize import convert_modis, harmonize, support_factor, trust_score
 from pipeline.tables.jsonio import nan_array
-from pipeline.tables.timeutil import day_index, days_in_month, era_of, month_list, week_of_year, parse
+from pipeline.tables.mocks import GAP
+from pipeline.tables.timeutil import day_index, days_in_month, era_of, month_list, parse, week_of_year
 
 D = C.DATA_DIR
+P = "indian_punjab"
 
 
 def load(name):
-    return json.loads((D / name).read_text())
+    return json.loads((D / name).read_text(encoding="utf-8"))
 
 
 @pytest.fixture(scope="module")
@@ -36,7 +38,7 @@ def _mutated(tmp_path, name, fn):
     data = load(name)
     fn(data)
     p = tmp_path / name
-    p.write_text(json.dumps(data))
+    p.write_text(json.dumps(data), encoding="utf-8")
     return p
 
 # ----------------------------------------------------------------- contract
@@ -55,7 +57,7 @@ def test_every_contract_row_has_a_mock():
 
 def test_schema_version_everywhere():
     for p in D.glob("*.json"):
-        assert json.loads(p.read_text())["schema_version"] == C.SCHEMA_VERSION, p.name
+        assert json.loads(p.read_text(encoding="utf-8"))["schema_version"] == C.SCHEMA_VERSION, p.name
 
 
 def test_missing_field_fails(tmp_path):
@@ -69,7 +71,7 @@ def test_extra_field_fails(tmp_path):
 
 
 def test_nested_extra_field_fails(tmp_path):
-    p = _mutated(tmp_path, "region_daily.json", lambda d: d["presets"]["indian_punjab"].update(total_fires=[]))
+    p = _mutated(tmp_path, "region_daily.json", lambda d: d["presets"][P].update(total_fires=[]))
     assert validate_file("region_daily", p)
 
 
@@ -85,7 +87,7 @@ def test_unequal_columns_fail(tmp_path):
 
 def test_zero_instead_of_null_viirs_fails(tmp_path):
     def zero(d):
-        d["presets"]["indian_punjab"]["viirs_td"][0] = 0
+        d["presets"][P]["viirs_td"][0] = 0
     p = _mutated(tmp_path, "region_daily.json", zero)
     assert any("never zero" in e for e in validate_file("region_daily", p))
 
@@ -98,15 +100,16 @@ def test_owner_cannot_review_own_check(tmp_path):
 @pytest.mark.parametrize("phrase", C.BANNED_PHRASES)
 def test_banned_phrase_fails(tmp_path, phrase):
     def poison(d):
-        d["presets"]["indian_punjab"]["this_month"]["sentence"] += f" ({phrase})"
+        d["presets"][P]["this_month"]["sentence"] += f" ({phrase})"
     p = _mutated(tmp_path, "narratives.json", poison)
     assert any("banned" in e for e in validate_file("narratives", p))
 
 
 def test_no_banned_phrase_in_repo():
-    paths = [p for ext in ("*.py", "*.md", "*.json", "*.csv", "Makefile*") for p in C.ROOT.rglob(ext)]
+    paths = [p for ext in ("*.py", "*.md", "*.ts", "Makefile*") for p in C.ROOT.rglob(ext)]
+    paths += list(D.rglob("*.json")) + list(D.rglob("*.csv"))
     for p in paths:
-        if ".pytest_cache" not in p.parts:
+        if ".pytest_cache" not in p.parts and "node_modules" not in p.parts:
             assert not find_banned(p.read_text(encoding="utf-8")), p
 
 
@@ -132,7 +135,7 @@ def test_three_presets_default_and_control():
     reg = {r["id"]: r for r in load("regions.json")["regions"]}
     assert [reg[i]["label"] for i in C.PRESET_IDS] == ["Indian Punjab", "Haryana", "Punjab + Haryana"]
     assert reg["punjab_haryana"]["default"] and reg["control"]["kind"] == "control"
-    assert reg["punjab_haryana"]["tiles_in_scope"]["r6"] == (reg["indian_punjab"]["tiles_in_scope"]["r6"]
+    assert reg["punjab_haryana"]["tiles_in_scope"]["r6"] == (reg[P]["tiles_in_scope"]["r6"]
                                                              + reg["haryana"]["tiles_in_scope"]["r6"])
 
 
@@ -140,12 +143,10 @@ def test_viirs_null_before_it_existed(daily):
     cut = day_index(C.VIIRS_START)
     v = daily["presets"]["punjab_haryana"]["viirs_td"]
     assert all(x is None for x in v[:cut]) and all(x is not None for x in v[cut:])
-    c = load("tile_month_2011.json")["columns"]
-    assert all(x is None for x in c["raw_viirs"])
+    assert all(x is None for x in load("tile_month_2011.json")["columns"]["raw_viirs"])
 
 
 def test_gap_is_null_not_zero(daily):
-    from pipeline.tables.mocks import GAP
     s = daily["presets"]["punjab_haryana"]
     for i in range(day_index(GAP[0]), day_index(GAP[1]) + 1):
         assert s["modis_td"][i] is None and s["harm"][i] is None
@@ -232,9 +233,6 @@ def test_manifest_precache_and_hashes(manifest):
     assert sum(f.startswith("tile_month_") for f in manifest["precache"]) == C.PRECACHE_TILE_MONTH_YEARS
     assert all(len(f["sha256"]) == 64 for f in manifest["files"])
     assert manifest["safety_disclaimer"] == C.SAFETY_DISCLAIMER and manifest["ai_use_note"]
-
-
-def test_precache_set_within_budget(manifest):
     total = sum((D / f).stat().st_size for f in manifest["precache"]) / 1024 / 1024
     assert total <= C.SIZE_BUDGET_MB, f"{total:.2f} MB"
 
@@ -294,6 +292,7 @@ def test_local_normal_flags_and_label():
 def test_time_helpers():
     months = month_list("2026-11-13")
     assert months[0] == "2000-11" and months[-1] == "2026-11"
-    assert [era_of(d) for d in ("2000-11-01", "2002-07-01", "2012-01", "2026-11-02", "2026-11-03")] == list("ABCCD")
+    days = ("2000-11-01", "2002-07-03", "2002-07-04", "2012-01", "2026-11-02", "2026-11-03")
+    assert [era_of(d) for d in days] == list("AABCCD")
     assert days_in_month("2026-11", "2026-11-13") == 13 and days_in_month("2024-02") == 29
     assert week_of_year(parse("2025-12-31")) == 51 and week_of_year(parse("2025-01-01")) == 0

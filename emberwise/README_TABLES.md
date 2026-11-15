@@ -1,45 +1,41 @@
-# EMBERWISE: analytics tables, schema and checks (M3)
+# M3 tables: how to run
 
-    pip install -r requirements-tables.txt
-    make tables        # build tables from the hand-offs -> docs/schema.md -> contract check -> size report
-    make test-tables   # the above, then pytest
-    make mocks         # rewrite the mock hand-offs (only needed while real files are missing)
+Everything M3 owns lives in `pipeline/tables/`. Settings are in one file: `pipeline/tables/config.py`.
 
-`make tables` creates mock hand-offs automatically if `data/processed/tile_day.parquet` is missing.
-When M1 and M2 drop real files in place, the same command builds the real tables.
+## Commands (run from the `emberwise` folder)
 
-| path | what |
-|---|---|
-| `pipeline/tables/config.py` | every tunable setting |
-| `pipeline/tables/contracts.py` | the schema, single source of truth |
-| `pipeline/tables/mocks.py` | mock stand-ins for M1, M2, M5 and M6 hand-offs |
-| `pipeline/tables/build.py` | tile_month, region_daily, climatology, periods, narratives, tile_geometry, manifest |
-| `pipeline/tables/harmonize.py` | conversion, cap, trust score |
-| `pipeline/tables/analytics.py` | climatology, critical periods, this-month, Local Normal, sentences |
-| `pipeline/tables/handoff.py` | turns M1's hand-off into regions.json and coverage.json |
-| `pipeline/tables/conversion.py` | M3's fallback fit of the plan's conversion, hide-a-year and Sensor-Loss simulation |
-| `web/src/contractAdapters.ts` | converts the contract files into the frontend's `types.ts` shapes |
-| `docs/M4_INTEGRATION.md` | integration notes and answers to SCHEMA_REQUESTS.md |
-| `pipeline/tables/checks.py` | rank test, baselines, external check, negative control; results go into `validation.json` |
-| `pipeline/tables/check_contract.py` | fails loudly on missing or extra fields and files |
-| `pipeline/tables/size_report.py` | MB per file against the 8 MB budget |
-| `docs/schema.md` | generated field reference |
-| `CHANGELOG.md` | schema-change protocol and history |
+With make (Mac, Linux): `make tables`
 
-Real data: when the repo-root `data/processed/` folder holds M1's `tile_day.parquet`, `tiles.parquet`
-and `regions.json` (plus `coverage.parquet` when available), `build_tables` uses them and writes real
-files (`"mock": false`). Without them it builds from the mocks. Tests always use their own mock tree.
+Windows PowerShell (no make), in this order:
 
-No `make` (Windows)? Run the same steps directly from this folder:
-
-    python -m pipeline.tables.make_mocks
+    python -m pip install -r requirements-tables.txt
     python -m pipeline.tables.build_tables
-    python -m pipeline.tables.gen_schema_md
     python -m pipeline.tables.check_contract
     python -m pipeline.tables.size_report
-    python -m pytest -q tests
+    python -m pytest -q
 
-External check: put the outside series in `data/external/external_series.csv` (columns `year,value`)
-and set `EXTERNAL_SOURCE`, `EXTERNAL_LIMITS` and `EXTERNAL_PRESET` in `config.py`. Without the file the check stays pending.
+Optional:
 
-All data currently in `web/public/data` is mock (`"mock": true`). Do not quote any number from it.
+    python -m pipeline.tables.make_mocks      (mock hand-offs and mock tables; never overwrites a real file)
+    python -m pipeline.tables.gen_schema_md   (regenerates docs/schema.md)
+
+## Where the inputs come from
+
+`build_tables` reads M1's hand-off from the repo-root `data/processed/` (tile_day.parquet,
+tiles.parquet, regions.json, coverage.parquet, and tile_day_r5/r7.parquet for the resolution check)
+and `data/boundary/control_district.geojson`. If `data/processed/tile_day.parquet` is not there it
+falls back to the mocks in `emberwise/data/processed/` and every output says `"mock": true`.
+The external yearly series is `emberwise/data/external/external_series.csv` (`year,value`).
+
+## What comes out
+
+`web/public/data/*.json` (schema 1.1) and `web/public/data/hotspots/*.csv`. See `docs/schema.md`.
+Check results are in `validation.json`, each under its own key with an owner and a reviewer.
+
+## Rules the code enforces
+
+- MODIS and VIIRS are never added. Each day has one source: VIIRS where it has data, else MODIS x ratio.
+- Missing data is null, never zero.
+- Every value is labelled Measured, Estimated, Indicative or Provisional.
+- The headline number is relative burning activity (tile-days). It is not fire size, burned area or a count of fires.
+- Banned phrases fail the contract check and a test.

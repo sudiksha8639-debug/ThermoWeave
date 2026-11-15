@@ -1,0 +1,6 @@
+*.pyc
+**/*cache*/
+.pytest_cache/
+node_modules/
+data/raw/
+data/processed/

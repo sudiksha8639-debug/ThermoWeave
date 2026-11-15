@@ -1,13 +1,13 @@
 """Build M3's tables from the hand-offs (plan s5): the same code runs on mocks and on real data.
 
-Inputs : data/processed/tiles.parquet, data/processed/tile_day.parquet (M1),
-         web/public/data/{regions,coverage,conversion}.json (M6/M1, M1, M2).
+Inputs : data/processed/tiles.parquet, tile_day.parquet (M1); regions, coverage, conversion JSON.
+         With M1's real hand-off present, handoff.prepare writes those JSON files first.
 Outputs: tile_month_YYYY.json, region_daily.json, climatology.json, periods.json,
-         narratives.json, tile_geometry.json, manifest.json in web/public/data.
+         narratives.json, tile_geometry.json, manifest.json, and the check results in validation.json.
 
-Rules enforced here: one source of truth per day (VIIRS where it has data,
-otherwise MODIS x conversion ratio); MODIS and VIIRS are never added for the
-same day; a gap is null, never zero; every value carries a label.
+Rules enforced here: one source of truth per day (VIIRS where it has data, otherwise MODIS x
+conversion ratio); MODIS and VIIRS are never added for the same day; a gap is null, never zero;
+every value carries a label.
 """
 from __future__ import annotations
 
@@ -171,7 +171,7 @@ def tile_month_file(year: int, agg: dict, inp: dict, flags: dict, tab: dict, mon
 # -------------------------------------------------------------- region_daily
 
 def day_ratios(tab: dict, cal: dict, n_zones: int) -> dict:
-    """{field: array[day, zone]} of the ratio that applies to each day (era A before Jul 2002, else B)."""
+    """{field: array[day, zone]} of the ratio that applies to each day (era A, else B)."""
     era_a = np.array([era_of(d) == "A" for d in cal["date"]])
     out = {}
     for k in ("ratio", "widened_lo", "widened_hi"):
@@ -213,8 +213,7 @@ def region_daily(agg: dict, inp: dict, flags: dict, tab: dict, cal: dict) -> dic
         est = {k: convert_modis(m, r).sum(axis=1) for k, r in ratios.items()}
         series = {}
         for out, k in (("harm", "ratio"), ("lo", "widened_lo"), ("hi", "widened_hi")):
-            x = np.where(flags["vday"], v, np.where(flags["mday"], np.minimum(est[k], count), np.nan))
-            series[out] = x
+            series[out] = np.where(flags["vday"], v, np.where(flags["mday"], np.minimum(est[k], count), np.nan))
         presets[p["id"]] = {
             "tile_count": count,
             "modis_td": qlist(gap(m.sum(axis=1), flags["modis"])),
@@ -309,6 +308,26 @@ def tile_geometry(inp: dict) -> dict:
                          "verts": [x for p in parents for x in _verts(p)],
                          "parent": [pidx[h3.cell_to_parent(c, C.H3_FALLBACK_RES)] for c in cells]}}
 
+# ---------------------------------------------------------------- validation
+
+def update_validation(data_dir: Path, processed_dir: Path, agg, inp, flags, tab, months, cal, rd) -> list[str]:
+    """Run the checks and write their results into validation.json under their own keys.
+
+    Blocks nobody has run stay pending. Checks M3 runs in place of M2 or M5 are marked with
+    owner M3 and a different reviewer. Returns the keys that were run.
+    """
+    path = data_dir / "validation.json"
+    if not path.exists():
+        return []
+    val = read_json(path)
+    results = checks.run_all(agg, inp, flags, tab, months, cal, rd, val, processed_dir)
+    for key, result in results.items():
+        val[key].update(status="done", result=result)
+        if key in C.FALLBACK_KEYS:
+            val[key].update(owner="M3", reviewer=C.FALLBACK_REVIEWER)
+    write_json(path, val)
+    return sorted(results)
+
 # ------------------------------------------------------------------ manifest
 
 def contract_of(rel: str) -> str:
@@ -325,7 +344,7 @@ def precache_list(years: list[int]) -> list[str]:
 
 
 def manifest(inp: dict, months: list[str], labels_by_ym: list[str], data_dir: Path) -> dict:
-    """manifest.json: hashes, provenance placeholders for M1/M2, shared lookups."""
+    """manifest.json: hashes, provenance, shared lookups."""
     rel = lambda p: p.relative_to(data_dir).as_posix()      # noqa: E731  forward slashes on every OS
     files = [{"path": rel(p), "contract": contract_of(rel(p)), "bytes": p.stat().st_size, "sha256": sha256(p)}
              for p in sorted(data_dir.rglob("*")) if p.is_file() and p.name != "manifest.json"]
@@ -342,30 +361,11 @@ def manifest(inp: dict, months: list[str], labels_by_ym: list[str], data_dir: Pa
             "ai_use_note": AI_USE_NOTE, "safety_disclaimer": C.SAFETY_DISCLAIMER,
             "budget_mb": C.SIZE_BUDGET_MB, "precache": precache_list(years), "files": files}
 
-# ---------------------------------------------------------------- validation
-
-def update_validation(data_dir: Path, agg, inp, flags, tab, months, cal, rd) -> list[str]:
-    """Run M3's checks and write their results into validation.json under their own keys.
-
-    Blocks owned by M2 and M5 are left untouched. Returns the keys that were run.
-    """
-    path = data_dir / "validation.json"
-    if not path.exists():
-        return []
-    val = read_json(path)
-    results = checks.run_all(agg, inp, flags, tab, months, cal, rd, val)
-    for key, result in results.items():
-        val[key].update(status="done", result=result)
-    write_json(path, val)
-    return sorted(results)
-
 # -------------------------------------------------------------------- driver
 
-def build(data_dir: Path = C.DATA_DIR, processed_dir: Path = C.PROCESSED_DIR) -> dict:
-    """Build every M3 table. Returns a short summary.
-
-    With M1's real hand-off in processed_dir, the upstream JSON files are written from it first.
-    """
+def build(data_dir: Path | None = None, processed_dir: Path | None = None) -> dict:
+    """Build every M3 table. Returns a short summary."""
+    data_dir, processed_dir = Path(data_dir or C.DATA_DIR), Path(processed_dir or C.PROCESSED_DIR)
     notes = handoff.prepare(data_dir, processed_dir) if handoff.is_real(processed_dir) else {}
     inp = load_inputs(data_dir, processed_dir, notes.get("as_of"))
     inp["model_version"] = notes.get("model_version")
@@ -391,8 +391,10 @@ def build(data_dir: Path = C.DATA_DIR, processed_dir: Path = C.PROCESSED_DIR) ->
     put("periods.json", periods(rd, cal))
     put("narratives.json", narratives(rd, mats, cal, inp["as_of"]))
     put("tile_geometry.json", tile_geometry(inp))
-    done = update_validation(data_dir, agg, inp, flags, tab, months, cal, rd)
+    done = update_validation(data_dir, processed_dir, agg, inp, flags, tab, months, cal, rd)
     labels_by_ym = [month_label(ym, flags, inp["as_of"]) for ym in months]
     put("manifest.json", manifest(inp, months, labels_by_ym, data_dir))
-    return {"notes": notes, "checks_run": done, "as_of": inp["as_of"], "tiles": len(inp["tiles"]), "zones": len(inp["zones"]),
-            "months": len(months), "mock": inp["mock"]}
+    (mm, mp), (vm, vp) = mats[C.DEFAULT_PRESET, "modis"], mats[C.DEFAULT_PRESET, "viirs"]
+    notes["local_normal_weeks"] = A.local_normal_counts(mm, vm, mp["p90"], vp["p90"])
+    return {"notes": notes, "checks_run": done, "as_of": inp["as_of"], "tiles": len(inp["tiles"]),
+            "zones": len(inp["zones"]), "months": len(months), "mock": inp["mock"]}

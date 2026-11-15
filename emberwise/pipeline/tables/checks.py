@@ -1,4 +1,5 @@
-"""M3's validation checks (plan s7): rank test, baselines, external check, negative control.
+"""Validation checks (plan s7): rank test, baselines, external check, negative control,
+seam step and resolution sensitivity.
 
 Every function returns the `result` object for its key in validation.json and reports
 the value as found. Nothing here decides to hide a weak result.
@@ -14,7 +15,10 @@ from scipy.stats import spearmanr
 
 from . import analytics as A
 from . import config as C
-from .timeutil import day_index, parse
+from . import conversion as CV
+from .harmonize import convert_modis
+from .jsonio import nan_array
+from .timeutil import day_index, days_in_month, parse
 
 # ------------------------------------------------------------------ rank test
 
@@ -69,11 +73,9 @@ def monthly_pairs(agg: dict, inp: dict, flags: dict, tab: dict, months: list[str
     """(MODIS-converted monthly value, VIIRS monthly value, calendar month) for full Suomi NPP months.
 
     The converted value uses MODIS alone, so the pair tests the harmonization against what VIIRS saw.
+    Months with a VIIRS gap are left out.
     """
-    from .harmonize import convert_modis
-    from .timeutil import days_in_month
-    parts = [C.BASE_REGIONS.index(r) for r in next(p for p in C.PRESETS if p["id"] == preset)["parts"]]
-    in_preset = np.isin(inp["region_of_tile"], parts)
+    in_preset = np.isin(inp["region_of_tile"], CV.preset_parts(preset))
     z = inp["zone_of_tile"]
     x, y, g = [], [], []
     for j, ym in enumerate(months):
@@ -91,7 +93,7 @@ def monthly_pairs(agg: dict, inp: dict, flags: dict, tab: dict, months: list[str
 # ------------------------------------------------------------------ baselines
 
 def baselines(hide: dict, modis_by_region_year: dict) -> dict:
-    """Per zone-month conversion (M2's hide-a-year predictions) against two simpler baselines.
+    """Per zone-month conversion (hide-a-year predictions) against two simpler baselines.
 
     no conversion: raw MODIS tile-days used as the prediction.
     one global ratio: sum(actual) / sum(MODIS) over the OTHER years of the same region, times MODIS.
@@ -121,7 +123,6 @@ def zone_month_baselines(agg: dict, inp: dict, months: list[str]) -> dict:
     Uses the plan's fit (refitted here without the hidden year), one global ratio from the other
     years, and no conversion. Zone-months with under CONVERSION_MIN_ACTUAL VIIRS tile-days are skipped.
     """
-    from . import conversion as CV
     y0, y1 = C.LEARNING_WINDOW
     nz = len(inp["zones"])
     V, M = np.zeros((nz, y1 - y0 + 1, 12)), np.zeros((nz, y1 - y0 + 1, 12))
@@ -146,11 +147,11 @@ def zone_month_baselines(agg: dict, inp: dict, months: list[str]) -> dict:
 
 
 def modis_region_year(agg: dict, inp: dict, months: list[str]) -> dict:
-    """{(preset index, year): MODIS tile-days} over the months M2's hide-a-year covers."""
+    """{(preset index, year): MODIS tile-days} over the months the hide-a-year test covers."""
     out = {}
     use = C.HIDE_A_YEAR_MONTHS
     for ri, p in enumerate(C.PRESETS):
-        sel = np.isin(inp["region_of_tile"], [C.BASE_REGIONS.index(r) for r in p["parts"]])
+        sel = np.isin(inp["region_of_tile"], CV.preset_parts(p["id"]))
         col = agg["m_all_td_month"][sel].sum(axis=0)
         for j, ym in enumerate(months):
             if ym == f"{C.LEARNING_WINDOW[0]}-01":
@@ -197,7 +198,8 @@ def control_daily(td: pl.DataFrame, n_days: int) -> np.ndarray:
          .group_by("date").agg(pl.col("n_tile_day").sum().alias("n")))
     out = np.zeros(n_days)
     for d, n in g.iter_rows():
-        out[day_index(d)] = n
+        if 0 <= day_index(d) < n_days:
+            out[day_index(d)] = n
     out[:day_index(C.VIIRS_START)] = np.nan
     out[day_index(C.SNPP_END) + 1:] = np.nan
     return out
@@ -219,18 +221,86 @@ def negative_control(series, tile_count: int, cal: dict) -> dict:
     return {"region": C.CONTROL_REGION["id"], "years": [y0, y1], "days_tested": tested,
             "false_anomalies": false, "rate": round(false / tested, 4) if tested else None}
 
+# ------------------------------------------------------------------ seam step
+
+def seam_step(preset_series: dict, cal: dict) -> dict:
+    """Size of the 2012 step in Oct-Nov activity, before and after harmonizing (plan s7).
+
+    The naive record splices MODIS counts (before VIIRS) to VIIRS counts (after). A ratio near 1
+    means no step. Compares the three seasons before the sensor change with the three after.
+    """
+    (b0, b1), (a0, a1) = C.SEAM_YEARS
+    season = np.isin(cal["month"], C.PILOT_MONTHS)
+
+    def splice(viirs_key, modis_key):
+        v, m = nan_array(preset_series[viirs_key]), nan_array(preset_series[modis_key])
+        return np.where(np.isnan(v), m, v)
+
+    def step(x):
+        mean = lambda y0, y1: np.mean([np.nansum(x[season & (cal["year"] == y)]) for y in range(y0, y1 + 1)])  # noqa: E731
+        before, after = mean(b0, b1), mean(a0, a1)
+        return round(float(after / before), 2) if before > 0 else None
+
+    return {"months": C.PILOT_MONTHS, "before": [b0, b1], "after": [a0, a1],
+            "naive_hotspots_step": step(splice("viirs_hotspots", "modis_hotspots")),
+            "naive_tile_days_step": step(splice("viirs_td", "modis_td")),
+            "harmonized_step": step(nan_array(preset_series["harm"])),
+            "reading": "after / before; 1.0 = no step"}
+
+# ------------------------------------------------------- resolution sensitivity
+
+def res_daily(path: Path, flags: dict, n_days: int) -> np.ndarray:
+    """Suomi NPP day-pass tiles burning per day at another resolution, from M1's res file.
+
+    NaN outside the Suomi NPP record and on gap days, exactly like the res-6 series.
+    """
+    df = (pl.read_parquet(path, columns=["state", "h3", "date", "sensor_set", "daynight"])
+          .with_columns(pl.col("sensor_set").replace(C.SENSOR_SET_ALIASES))
+          .filter((pl.col("sensor_set") == C.SNPP_SET) & (pl.col("daynight") == "D")
+                  & pl.col("state").is_in(list(C.STATE_OF_REGION.values()))))
+    out = np.zeros(n_days)
+    for d, n in df.group_by("date").agg(pl.col("h3").n_unique().alias("n")).iter_rows():
+        if 0 <= day_index(d) < n_days:
+            out[day_index(d)] = n
+    out[~flags["vday"] | flags["relay"]] = np.nan
+    return out
+
+
+def res_sensitivity(series: dict, tiles: dict, cal: dict) -> dict:
+    """Do the top res-6 critical periods stay critical at res 5 and res 7? (plan s2, s7.)
+
+    series, tiles: {resolution: daily series / in-scope tile count}. Measured VIIRS only, so no
+    conversion is involved. A res-6 period is confirmed at another resolution if a critical
+    period there overlaps it.
+    """
+    runs = {}
+    for r in series:
+        found, roll, _, _ = A.anomaly_runs(series[r], tiles[r], cal)
+        runs[r] = (found, roll)
+    top = sorted(runs[C.H3_RES][0], key=lambda ab: -np.nanmax(runs[C.H3_RES][1][ab[0]:ab[1] + 1]))[:C.SENSITIVITY_TOP_N]
+    others = [r for r in series if r != C.H3_RES]
+    periods = []
+    for a, b in sorted(top):
+        hit = {f"r{r}": any(x <= b and y >= a for x, y in runs[r][0]) for r in others}
+        periods.append({"start": cal["date"][a].isoformat(), "end": cal["date"][b].isoformat(), **hit})
+    return {"sensor": "Suomi NPP VIIRS, day passes (measured, no conversion)", "top_n": len(periods),
+            "tiles_in_scope": {f"r{r}": int(tiles[r]) for r in series},
+            "periods_found": {f"r{r}": len(runs[r][0]) for r in series},
+            "confirmed": {f"r{r}": int(sum(p[f"r{r}"] for p in periods)) for r in others},
+            "confirmed_at_all": int(sum(all(p[f"r{r}"] for r in others) for p in periods)),
+            "periods": periods}
+
 # -------------------------------------------------------------------- driver
 
 def run_all(agg: dict, inp: dict, flags: dict, tab: dict, months: list[str], cal: dict, rd: dict,
-            validation: dict) -> dict:
-    """Run every M3 check and return {key: result}. A check whose input is absent is left out (stays pending)."""
-    from .jsonio import nan_array
+            validation: dict, processed_dir: Path) -> dict:
+    """Run every check and return {key: result}. A check whose input is absent is left out (stays pending)."""
     out = {}
     x, y, g = monthly_pairs(agg, inp, flags, tab, months, C.DEFAULT_PRESET)
     other = "within_month" if C.RANK_METHOD == "deseasonalized" else "deseasonalized"
     out["rank_test"] = {**rank_test(x, y, g), "other_method": rank_test(x, y, g, method=other)}
     hide = (validation.get("hide_a_year") or {}).get("result")
-    if hide:
+    if hide and hide["columns"]["year"]:
         out["baselines"] = {**baselines(hide["columns"], modis_region_year(agg, inp, months)),
                             "zone_month_level": zone_month_baselines(agg, inp, months)}
     external = read_external()
@@ -240,4 +310,19 @@ def run_all(agg: dict, inp: dict, flags: dict, tab: dict, months: list[str], cal
     if inp["control_tiles"]:
         out["negative_control"] = negative_control(control_daily(inp["td"], len(cal["date"])),
                                                    inp["control_tiles"], cal)
+    out["seam_step"] = seam_step(rd["presets"][C.DEFAULT_PRESET], cal)
+    if C.USE_FALLBACK_CONVERSION:
+        cube = CV.monthly_cube(inp["td"], inp["zones"], C.LEARNING_WINDOW[0], parse(inp["as_of"]).year)
+        out["error_by_level"] = CV.error_by_level(cube)
+        out["era_b_test"] = CV.era_b_test(inp["td"], inp["zones"])
+        out["ratio_trend"] = CV.ratio_trend(cube)
+    scope = next(r for r in inp["regions"]["regions"] if r["id"] == C.DEFAULT_PRESET)["tiles_in_scope"]
+    paths = {r: processed_dir / f"tile_day_r{r}.parquet" for r in C.SENSITIVITY_RES if r != C.H3_RES}
+    if all(p.exists() for p in paths.values()) and all(scope.get(f"r{r}") for r in C.SENSITIVITY_RES):
+        n = len(cal["date"])
+        own = agg["v_td_day"].sum(axis=(1, 2)).astype(float)
+        own[~flags["vday"] | flags["relay"]] = np.nan
+        series = {C.H3_RES: own, **{r: res_daily(p, flags, n) for r, p in paths.items()}}
+        out["res_sensitivity"] = res_sensitivity(dict(sorted(series.items())),
+                                                 {r: scope[f"r{r}"] for r in C.SENSITIVITY_RES}, cal)
     return out

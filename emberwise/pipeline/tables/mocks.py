@@ -3,7 +3,7 @@
 Writes data/processed/{tiles,tile_day}.parquet and the upstream JSON contracts
 (regions, coverage, hourly, drift, conversion, validation, relay_sim, hotspot CSV
 headers). M3's own tables are then built from these by build.py, exactly as they
-will be from the real hand-offs.
+are from the real hand-offs. A real file ("mock": false) is never overwritten.
 
 Everything is "mock": true. Behaviour is meant to be realistic (Oct-Nov peak,
 smaller Apr-May peak, quiet months, saturated days, VIIRS absent before 2012,
@@ -19,7 +19,9 @@ import numpy as np
 import polars as pl
 
 from . import config as C
-from .jsonio import envelope, qlist, read_json, write_json
+from . import conversion as CV
+from .handoff import coverage_json, validation_skeleton
+from .jsonio import envelope, read_json, write_json
 from .timeutil import day_index, index_day, parse
 
 SEED = 20261114
@@ -34,16 +36,14 @@ POLYS = {
                 (29.6, 75.6), (30.3, 76.6), (30.7, 76.9)],
     "control": [(32.0, 77.0), (32.9, 76.7), (33.2, 77.6), (32.6, 78.6), (31.9, 78.4)],
 }
-MOCK_BOUNDARY = "MOCK rough outline; real source and licence to be recorded by M6 [verify]"
+MOCK_BOUNDARY = "MOCK rough outline; not a real boundary"
 
 # Mock-only dates and detection chances (not facts about the satellites).
-AQUA_START = "2002-07-01"
+AQUA_START = "2002-07-04"
 NOAA20_START = "2018-01-01"
 NRT_START = "2026-09-01"
 GAP = ("2005-07-10", "2005-07-12")            # MODIS outage, to exercise "a gap is null, never zero"
 P_DETECT = {"terra": 0.30, "aqua": 0.35, "snpp": 0.95, "noaa20": 0.93}
-WIDEN = {"A": 0.25, "B": 0.15}                # stands in for M2's tested-error widening
-RELAY_SEASON = 2025
 
 
 def env() -> dict:
@@ -124,12 +124,12 @@ def simulate_year(year: int, amp: np.ndarray, as_of: date) -> dict:
 
 
 def build_tile_day(tiles: pl.DataFrame, as_of: str) -> pl.DataFrame:
-    """tile_day.parquet in M1's contract shape (sparse rows)."""
+    """tile_day.parquet in M1's contract shape (sparse rows, day passes only)."""
     amp, a = burn_propensity(tiles), parse(as_of)
     ti, dd, ss, hs = [], [], [], []
     for year in range(parse(C.EPOCH).year, a.year + 1):
         sim = simulate_year(year, amp, a)
-        for sset in ("TERRA", "MODIS_ALL", C.SNPP_SET, C.RELAY_SET):
+        for sset in ("TERRA", "MODIS_ALL", "VIIRS_SNPP", "VIIRS_NOAA20"):
             t, d = np.nonzero(sim[sset])
             ti.append(t); dd.append(sim["days"][d]); hs.append(sim[sset][t, d])
             ss.append(np.full(len(t), C.SENSOR_SETS.index(sset)))
@@ -145,139 +145,10 @@ def build_tile_day(tiles: pl.DataFrame, as_of: str) -> pl.DataFrame:
         "n_hotspots": hs.astype(np.int32), "n_tile_day": np.ones(len(hs), np.int32),
     })
 
-# ------------------------------------------------------- aggregates for mocks
-
-def yearly_cube(td: pl.DataFrame, zones: list[str], last_year: int, col: str = "n_tile_day") -> dict:
-    """{sensor_set: array[base region, zone, year, month]} for 2012 onward, Suomi NPP period only."""
-    y0 = C.LEARNING_WINDOW[0]
-    g = (td.filter(pl.col("region").is_in(C.BASE_REGIONS) & (pl.col("date") <= parse(C.SNPP_END))
-                   & (pl.col("date").dt.year() >= y0))
-         .group_by("region", "zone_r3", pl.col("date").dt.year().alias("y"),
-                   pl.col("date").dt.month().alias("m"), "sensor_set").agg(pl.col(col).sum().alias("n")))
-    zi = {z: i for i, z in enumerate(zones)}
-    cube = {s: np.zeros((2, len(zones), last_year - y0 + 1, 12)) for s in C.SENSOR_SETS}
-    for r, z, y, m, s, n in g.iter_rows():
-        if (y, m) != (y0, 1):                       # January 2012 is partial for VIIRS: left out
-            cube[s][C.BASE_REGIONS.index(r), zi[z], y - y0, m - 1] = n
-    return cube
-
-
-def _div(a, b):
-    with np.errstate(divide="ignore", invalid="ignore"):
-        return np.where(b > 0, a / b, np.nan)
-
-
-def fit_ratio(V: np.ndarray, M: np.ndarray, k: float = C.K_SUPPORT):
-    """Shrunk zone-month ratio (plan s6): (sum V + k r_region) / (sum M + k). V, M: [zone, year, month]."""
-    r_region = _div(V.sum(axis=(0, 1)), M.sum(axis=(0, 1)))
-    r_hat = (V.sum(axis=1) + k * r_region) / (M.sum(axis=1) + k)
-    yearly = (V + k * r_region) / (M + k)
-    return r_hat, yearly
-
-
-def conversion_json(cube: dict, zones: list[str]) -> dict:
-    """conversion.json: stands in for M2 (learned twice, shrunk, range widened)."""
-    y0, y1 = C.LEARNING_WINDOW
-    L = slice(0, y1 - y0 + 1)
-    V = cube[C.SNPP_SET].sum(axis=0)
-    cols = {k: [] for k in ("zone", "month", "era", "ratio", "lo", "hi", "widened_lo", "widened_hi", "n_support")}
-    for era, mset in (("A", "TERRA"), ("B", C.MODIS_SET)):
-        M = cube[mset].sum(axis=0)
-        r_hat, yearly = fit_ratio(V[:, L], M[:, L])
-        lo = np.minimum(np.percentile(yearly, 10, axis=1), r_hat)
-        hi = np.maximum(np.percentile(yearly, 90, axis=1), r_hat)
-        for z in range(len(zones)):
-            for m in range(12):
-                cols["zone"].append(z); cols["month"].append(m + 1); cols["era"].append(era)
-                vals = (r_hat[z, m], lo[z, m], hi[z, m], lo[z, m] * (1 - WIDEN[era]), hi[z, m] * (1 + WIDEN[era]))
-                for key, v in zip(("ratio", "lo", "hi", "widened_lo", "widened_hi"), vals):
-                    cols[key].append(None if np.isnan(v) else round(float(v), C.Q_RATIO))
-                cols["n_support"].append(int(M[z, L, m].sum()))
-    M = cube[C.MODIS_SET].sum(axis=0)
-    rby = {k: [] for k in ("zone", "month", "year", "ratio", "in_learning_window")}
-    for z in range(len(zones)):
-        for m in C.PILOT_MONTHS:
-            for yi in range(M.shape[1]):
-                r = _div(V[z, yi, m - 1], M[z, yi, m - 1])
-                rby["zone"].append(z); rby["month"].append(m); rby["year"].append(y0 + yi)
-                rby["ratio"].append(None if np.isnan(r) else round(float(r), C.Q_RATIO))
-                rby["in_learning_window"].append(y0 + yi <= y1)
-    return {**env(), "unit": "VIIRS tile-days per MODIS tile-day", "learning_window": [y0, y1],
-            "k": C.K_SUPPORT, "zones": zones, "columns": cols, "ratio_by_year": {"columns": rby}}
-
-
-def _preset_parts(pid: str) -> list[int]:
-    return [C.BASE_REGIONS.index(r) for r in next(p for p in C.PRESETS if p["id"] == pid)["parts"]]
-
-
-def pending(name: str, result) -> dict:
-    """A check block that has not been run on real data yet."""
-    return {"owner": C.OWNERS[name], "reviewer": C.REVIEWERS[name], "status": "pending",
-            "label": "Measured", "result": result}
-
-
-def validation_json(cube: dict) -> dict:
-    """validation.json: mock hide-a-year from M2, every other check pending."""
-    y0, y1 = C.LEARNING_WINDOW
-    L = slice(0, y1 - y0 + 1)
-    V, M = cube[C.SNPP_SET][:, :, L], cube[C.MODIS_SET][:, :, L]
-    cols = {k: [] for k in ("region", "year", "predicted", "actual", "in_range")}
-    for yi in range(y1 - y0 + 1):
-        keep = np.arange(y1 - y0 + 1) != yi
-        r_hat, _ = fit_ratio(V.sum(axis=0)[:, keep], M.sum(axis=0)[:, keep])       # learned without the year
-        for ri, pid in enumerate(C.PRESET_IDS):
-            m_y = M[_preset_parts(pid)].sum(axis=0)[:, yi]
-            pred, actual = float(np.nansum(m_y * r_hat)), float(V[_preset_parts(pid)].sum(axis=0)[:, yi].sum())
-            cols["region"].append(ri); cols["year"].append(y0 + yi)
-            cols["predicted"].append(round(pred, C.Q_VALUE)); cols["actual"].append(actual)
-            cols["in_range"].append(bool(pred * (1 - WIDEN["B"]) <= actual <= pred * (1 + WIDEN["B"])))
-    hide = pending("hide_a_year", {"columns": cols})
-    lo, hi = C.NEG_CONTROL_YEARS
-    out = {"hide_a_year": hide}
-    for name in ("error_by_level", "seam_step", "era_b_test", "ratio_trend", "res_sensitivity", "nrt_seam"):
-        out[name] = pending(name, None)
-    out["baselines"] = pending("baselines", {"metric": "mean absolute percent error", "n": 0,
-                                             "per_zone_month": None, "global_ratio": None,
-                                             "no_conversion": None, "beats_both": None,
-                                           "zone_month_level": None})
-    out["rank_test"] = pending("rank_test", {"method": "within calendar month, across years", "rho": None,
-                                             "threshold": C.RANK_PASS, "passed": None, "n": 0,
-                                             "other_method": None})
-    out["external_check"] = pending("external_check", {
-        "source": "[verify] MCD64A1 burned area or published Punjab farm-fire counts; chosen in prep by M6",
-        "source_limits": "Only partly independent and may itself miss small crop fires.",
-        "rho": None, "n": 0, "years": []})
-    out["negative_control"] = pending("negative_control", {"region": C.CONTROL_REGION["id"], "years": [lo, hi],
-                                                           "days_tested": 0, "false_anomalies": None, "rate": None})
-    order = ["hide_a_year", "error_by_level", "baselines", "rank_test", "seam_step", "era_b_test",
-             "ratio_trend", "res_sensitivity", "nrt_seam", "external_check", "negative_control"]
-    return {**env(), **{k: out[k] for k in order}}
-
-
-def relay_sim_json(td: pl.DataFrame) -> dict:
-    """relay_sim.json: Sensor-Loss simulation on the last full Oct-Nov season (mock for M2)."""
-    d = (td.filter(pl.col("region").is_in(C.BASE_REGIONS) & pl.col("date").dt.month().is_in(C.PILOT_MONTHS)
-                   & pl.col("sensor_set").is_in([C.SNPP_SET, C.RELAY_SET]))
-         .group_by("date", "sensor_set").agg(pl.col("n_tile_day").sum().alias("n")))
-    overlap = list(range(parse(NOAA20_START).year, RELAY_SEASON))
-    tot = {s: d.filter((pl.col("sensor_set") == s) & pl.col("date").dt.year().is_in(overlap))["n"].sum()
-           for s in (C.SNPP_SET, C.RELAY_SET)}
-    align = tot[C.SNPP_SET] / tot[C.RELAY_SET]
-    season_days = range(day_index(date(RELAY_SEASON, 10, 1)), day_index(date(RELAY_SEASON, 11, 30)) + 1)
-    by = {(dt, s): n for dt, s, n in d.filter(pl.col("date").dt.year() == RELAY_SEASON).iter_rows()}
-    cols = {"date": [], "suomi_actual": [], "relay_built": [], "pct_diff": []}
-    for i in season_days:
-        actual, built = by.get((index_day(i), C.SNPP_SET), 0), by.get((index_day(i), C.RELAY_SET), 0) * align
-        cols["date"].append(i); cols["suomi_actual"].append(actual)
-        cols["relay_built"].append(round(built, C.Q_VALUE))
-        cols["pct_diff"].append(round(100 * (built - actual) / actual, 1) if actual else None)
-    return {**env(), "region": C.DEFAULT_PRESET, "season": RELAY_SEASON, "relay_satellite": "NOAA-20",
-            "overlap_years": overlap, "epoch": C.EPOCH, "columns": cols}
-
 # --------------------------------------------------------- coverage and clock
 
-def coverage_json(as_of: str) -> dict:
-    """coverage.json as runs of (sensor_set, product, start, end, has_data)."""
+def coverage_runs(as_of: str) -> list[tuple]:
+    """Mock coverage as runs of (sensor_set, product, start, end, has_data)."""
     end, nrt, g0, g1 = day_index(as_of), day_index(NRT_START), day_index(GAP[0]), day_index(GAP[1])
     runs = []
     for s in ("TERRA", C.MODIS_SET):
@@ -286,10 +157,7 @@ def coverage_json(as_of: str) -> dict:
     runs += [(C.SNPP_SET, "SP", day_index(C.VIIRS_START), nrt - 1, True),
              (C.SNPP_SET, "NRT", nrt, day_index(C.SNPP_END), True),
              (C.RELAY_SET, "SP", day_index(NOAA20_START), nrt - 1, True), (C.RELAY_SET, "NRT", nrt, end, True)]
-    cols = {"sensor_set": [C.SENSOR_SETS.index(r[0]) for r in runs],
-            "product": [C.PRODUCTS.index(r[1]) for r in runs],
-            "start": [r[2] for r in runs], "end": [r[3] for r in runs], "has_data": [r[4] for r in runs]}
-    return {**env(), "epoch": C.EPOCH, "sensor_sets": C.SENSOR_SETS, "products": C.PRODUCTS, "columns": cols}
+    return runs
 
 
 def overpass_hour(sat: str, year: int) -> float:
@@ -316,10 +184,10 @@ def drift_json(cube: dict, as_of: str) -> dict:
     rby = {"year": [], "region": [], "ratio": []}
     for yi in range(cube[C.SNPP_SET].shape[2]):
         for ri, pid in enumerate(C.PRESET_IDS):
-            parts = _preset_parts(pid)
-            r = _div(cube[C.SNPP_SET][parts][:, :, yi][:, :, pm].sum(), cube[C.MODIS_SET][parts][:, :, yi][:, :, pm].sum())
+            parts = CV.preset_parts(pid)
+            v, m = cube[C.SNPP_SET][parts][:, :, yi][:, :, pm].sum(), cube[C.MODIS_SET][parts][:, :, yi][:, :, pm].sum()
             rby["year"].append(y0 + yi); rby["region"].append(ri)
-            rby["ratio"].append(None if np.isnan(r) else round(float(r), C.Q_RATIO))
+            rby["ratio"].append(round(float(v / m), C.Q_RATIO) if m > 0 else None)
     return {**env(), "satellites": C.SATELLITES, "columns": cols,
             "modis_viirs_ratio_by_year": {"months": C.PILOT_MONTHS, "learning_window": list(C.LEARNING_WINDOW),
                                           "columns": rby}}
@@ -330,14 +198,12 @@ def hourly_json(td: pl.DataFrame) -> dict:
     g = (td.filter(pl.col("region").is_in(C.BASE_REGIONS))
          .group_by("region", pl.col("date").dt.year().alias("y"), pl.col("date").dt.month().alias("m"), "sensor_set")
          .agg(pl.col("n_hotspots").sum().alias("n")))
-    tot: dict = {}
-    for r, y, m, s, n in g.iter_rows():
-        tot[(r, y, m, s)] = n
+    tot = {(r, y, m, s): n for r, y, m, s, n in g.iter_rows()}
     cols = {k: [] for k in ("region", "satellite", "year", "month", "local_hour", "n_hotspots")}
     sat_of = {"Terra": "TERRA", "Suomi NPP": C.SNPP_SET, "NOAA-20": C.RELAY_SET}
+    keys = sorted({(y, m) for (_, y, m, _) in tot})
     for ri, pid in enumerate(C.PRESET_IDS):
         parts = next(p for p in C.PRESETS if p["id"] == pid)["parts"]
-        keys = sorted({(y, m) for (_, y, m, _) in tot})
         for sat in SAT_FIRST_YEAR:
             for y, m in keys:
                 if sat == "Aqua":
@@ -355,8 +221,10 @@ def hourly_json(td: pl.DataFrame) -> dict:
 
 # -------------------------------------------------------------------- driver
 
-def generate(as_of: str = C.MOCK_AS_OF, data_dir=C.DATA_DIR, processed_dir=C.MOCK_PROCESSED_DIR) -> None:
+def generate(as_of: str = C.MOCK_AS_OF, data_dir=None, processed_dir=None) -> None:
     """Write every upstream mock: Parquet hand-offs, upstream JSON and hotspot CSV headers."""
+    from pathlib import Path
+    data_dir, processed_dir = Path(data_dir or C.DATA_DIR), Path(processed_dir or C.MOCK_PROCESSED_DIR)
     processed_dir.mkdir(parents=True, exist_ok=True)
     (data_dir / "hotspots").mkdir(parents=True, exist_ok=True)
     tiles = build_tiles()
@@ -364,16 +232,18 @@ def generate(as_of: str = C.MOCK_AS_OF, data_dir=C.DATA_DIR, processed_dir=C.MOC
     tiles.write_parquet(processed_dir / "tiles.parquet")
     td.write_parquet(processed_dir / "tile_day.parquet")
     zones = sorted(tiles.filter(pl.col("region").is_in(C.BASE_REGIONS))["zone_r3"].unique().to_list())
-    cube = yearly_cube(td, zones, parse(as_of).year)
-    for name, obj in (("regions", regions_json(tiles)), ("coverage", coverage_json(as_of)),
-                      ("hourly", hourly_json(td)), ("drift", drift_json(cube, as_of)),
-                      ("conversion", conversion_json(cube, zones)), ("validation", validation_json(cube)),
-                      ("relay_sim", relay_sim_json(td))):
+    cube = CV.monthly_cube(td, zones, C.LEARNING_WINDOW[0], parse(as_of).year)
+    conv, widen = CV.build_conversion(cube, zones)
+    files = {"regions": regions_json(tiles), "coverage": {**env(), **coverage_json(coverage_runs(as_of))},
+             "hourly": hourly_json(td), "drift": drift_json(cube, as_of), "conversion": {**env(), **conv},
+             "validation": {**env(), **validation_skeleton(CV.hide_a_year(cube, widen["B"]))},
+             "relay_sim": {**env(), **CV.relay_simulation(td)[0]}}
+    for name, obj in files.items():
         target = data_dir / f"{name}.json"
         if target.exists() and read_json(target).get("mock") is False:
             continue                                  # never overwrite a real hand-off with a mock
         write_json(target, obj)
-    for pid in C.PRESET_IDS:                      # header only; M1 fills these per preset and year
+    for pid in C.PRESET_IDS:                          # header only; M1 fills these per preset and year
         if any((data_dir / "hotspots").glob(f"hotspots_{pid}_*.csv")):
             continue
         (data_dir / "hotspots" / f"hotspots_{pid}_{as_of[:4]}.csv").write_text(
