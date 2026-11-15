@@ -1,5 +1,4 @@
-"""Stage B tests: every M3 function on small synthetic inputs, plus the checks run on the mocks."""
-import json
+"""Stage B tests: every M3 function on small synthetic inputs."""
 from datetime import date
 
 import numpy as np
@@ -8,6 +7,7 @@ import pytest
 from pipeline.tables import analytics as A
 from pipeline.tables import checks as K
 from pipeline.tables import config as C
+from pipeline.tables.contracts import find_banned
 from pipeline.tables.timeutil import day_index
 
 N = day_index("2026-11-13") + 1
@@ -31,7 +31,7 @@ def test_month_in_progress_uses_same_days_only():
     assert s["in_progress"] and s["days_compared"] == 13
     assert s["value"] == 13 * 22.5 and s["typical_median"] == 13 * 12.5      # 13 days, never a whole month
     assert s["pct_diff"] == 80 and (s["rank_higher_than"], s["rank_of"]) == (23, 26)
-    assert s["middle_half"] == pytest.approx([13 * 6.25, 13 * 18.75], abs=0.06)   # stored to 1 decimal
+    assert s["middle_half"] == pytest.approx([13 * 6.25, 13 * 18.75], abs=0.06)
     assert s["percentile"] == 88.5 and s["band"] == "above"
 
 
@@ -96,9 +96,7 @@ def test_near_saturation_variant_and_flag():
 
 
 def test_no_template_uses_banned_or_overclaiming_words():
-    from pipeline.tables.contracts import find_banned
-    text = " ".join(A.TEMPLATES.values())
-    assert not find_banned(text)
+    assert not find_banned(" ".join(A.TEMPLATES.values()))
     assert "relative burning activity" in A.TEMPLATES["index_note"].lower()
 
 # ------------------------------------------------------------ critical periods
@@ -135,8 +133,7 @@ def test_short_bursts_and_tiny_values_are_not_periods():
 
 
 def test_pct_rank_orders_years_on_the_same_dates():
-    x = month_series(11, NOV)
-    r = A.pct_rank(x, CAL["doy"])
+    r = A.pct_rank(month_series(11, NOV), CAL["doy"])
     i = lambda y: day_index(f"{y}-11-15")                      # noqa: E731
     assert r[i(2025)] > r[i(2013)] > r[i(2001)] and 0 <= np.nanmin(r) and np.nanmax(r) <= 100
 
@@ -230,15 +227,3 @@ def test_negative_control_counts_only_flagged_oct_nov_days():
     b = day_index("2018-06-10")
     quiet[b:b + 12] = 60.0                                     # outside Oct-Nov: not counted
     assert K.negative_control(quiet, 400, CAL)["false_anomalies"] == res["false_anomalies"]
-
-# ------------------------------------------------------ checks run on the mocks
-
-def test_validation_json_has_m3_results_with_owner_and_reviewer():
-    v = json.loads((C.DATA_DIR / "validation.json").read_text(encoding="utf-8"))
-    for key in ("rank_test", "baselines", "negative_control"):
-        assert v[key]["status"] == "done" and v[key]["owner"] == "M3" and v[key]["reviewer"] == "M1"
-        assert v[key]["result"] is not None
-    assert v["rank_test"]["result"]["rho"] is not None and v["rank_test"]["result"]["threshold"] == C.RANK_PASS
-    assert v["negative_control"]["result"]["days_tested"] == 61 * 14
-    assert v["external_check"]["status"] == "pending"          # no outside series supplied yet
-    assert v["hide_a_year"]["owner"] == "M2" and v["seam_step"]["result"] is None   # others untouched

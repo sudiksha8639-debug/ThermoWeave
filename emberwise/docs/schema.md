@@ -1,8 +1,8 @@
 # EMBERWISE data contract (schema_version 1.1)
 
 Generated from `pipeline/tables/contracts.py`. Do not edit by hand.
-Owner: M3. Deputy: M6 (additive changes only while M3 sleeps, H16-20). Protocol: `CHANGELOG.md`.
-Source: Build Plan v4, Section 5. Anything the plan does not state is marked [verify].
+Owner: M3. Deputy: M6 (additive changes only). Protocol: `CHANGELOG.md`.
+Source: Build Plan v4, Section 5.
 
 ## Rules that apply to every file
 
@@ -31,14 +31,14 @@ M6, M1 -> M3, M4. Three presets and the control district.
 | `mock` | boolean | true = synthetic mock data, never to be shown or quoted as real. |
 | `regions` | array[object] |  |
 | `regions[].id` | string | Region id used as a key in other files. |
-| `regions[].label` | string | Display label. Results are always labelled 'Indian Punjab and Haryana' style. |
+| `regions[].label` | string | Display label. |
 | `regions[].kind` | string (preset, control) | preset = selectable in the app; control = Lab negative control only. |
 | `regions[].default` | boolean | true for the preset the app opens with. |
 | `regions[].tiles_in_scope` | object | Clipped tile counts; r6 is the saturation cap. r5/r7 are null where M1 has not supplied them. |
 | `regions[].tiles_in_scope.r5` | integer | null | Tiles whose centroid is inside, H3 res 5. |
 | `regions[].tiles_in_scope.r6` | integer | Tiles whose centroid is inside, H3 res 6. |
 | `regions[].tiles_in_scope.r7` | integer | null | Tiles whose centroid is inside, H3 res 7. |
-| `regions[].boundary_source` | string | Boundary data source and licence. |
+| `regions[].boundary_source` | string | Boundary data source. |
 | `regions[].bbox` | array[number] x4 | [west, south, east, north] in degrees. |
 
 ### coverage: `coverage.json`
@@ -71,7 +71,7 @@ M1 -> M5. When each satellite looked (Fire Clock Dial).
 | `mock` | boolean | true = synthetic mock data, never to be shown or quoted as real. |
 | `satellites` | array[string] | Satellite names; code = index. |
 | `columns` | object | Sparse: rows with n_hotspots > 0 only. |
-| `columns.region` | array[integer] | Index into regions presets order (punjab, haryana, punjab_haryana). |
+| `columns.region` | array[integer] | Preset index (manifest.presets). |
 | `columns.satellite` | array[integer] | Satellite code. |
 | `columns.year` | array[integer] | Year. |
 | `columns.month` | array[integer] | Month 1-12. |
@@ -159,7 +159,7 @@ M2, M3, M5 -> M5. Validation evidence, shown in the Lab whatever it reveals.
 | `error_by_level.reviewer` | string | Who reviews it before merge (never the owner). |
 | `error_by_level.status` | string (pending, done) | pending = not yet run on real data. |
 | `error_by_level.label` | string (Measured, Estimated, Indicative, Provisional) | Value label. |
-| `error_by_level.result` | object | null | Shape defined by the owner (M2 or M5); to be closed by M3 once delivered. |
+| `error_by_level.result` | object | null | Free-form object defined by whoever ran the check; null while pending. See docs/STAGE_D_RESULTS.md. |
 | `baselines` | object | M3 / M1. Per zone-month conversion against two simpler baselines, at preset-year level. |
 | `baselines.owner` | string | Who wrote the check. |
 | `baselines.reviewer` | string | Who reviews it before merge (never the owner). |
@@ -167,12 +167,12 @@ M2, M3, M5 -> M5. Validation evidence, shown in the Lab whatever it reveals.
 | `baselines.label` | string (Measured, Estimated, Indicative, Provisional) | Value label. |
 | `baselines.result` | object | null | null while pending. |
 | `baselines.result.metric` | string | Error metric. |
-| `baselines.result.n` | integer | Region-years compared. |
+| `baselines.result.n` | integer | Preset-years compared. |
 | `baselines.result.per_zone_month` | number | null | Error of the per zone-month conversion. |
 | `baselines.result.global_ratio` | number | null | Error using one global ratio. |
 | `baselines.result.no_conversion` | number | null | Error using raw MODIS tile-days. |
 | `baselines.result.beats_both` | boolean | null | per_zone_month lower than both baselines. |
-| `baselines.result.zone_month_level` | object | null | The same comparison for each zone, month and hidden year (finer than a preset-year). |
+| `baselines.result.zone_month_level` | object | null | The same comparison for each zone, month and hidden year. |
 | `baselines.result.zone_month_level.n` | integer | Zone-month-years compared. |
 | `baselines.result.zone_month_level.per_zone_month` | number | null | Error of the per zone-month conversion. |
 | `baselines.result.zone_month_level.global_ratio` | number | null | Error using one global ratio. |
@@ -189,8 +189,8 @@ M2, M3, M5 -> M5. Validation evidence, shown in the Lab whatever it reveals.
 | `rank_test.result.threshold` | number | Pass mark. |
 | `rank_test.result.passed` | boolean | null | rho >= threshold. |
 | `rank_test.result.n` | integer | Pairs. |
-| `rank_test.result.other_method` | object | null | The same test by the other allowed method, reported for transparency. |
-| `rank_test.result.other_method.method` | string | The alternative way of removing seasonality. |
+| `rank_test.result.other_method` | object | null | The same test by the other allowed method. |
+| `rank_test.result.other_method.method` | string | How seasonality was removed. |
 | `rank_test.result.other_method.rho` | number | null | Spearman rho, as found. |
 | `rank_test.result.other_method.threshold` | number | Pass mark. |
 | `rank_test.result.other_method.passed` | boolean | null | rho >= threshold. |
@@ -200,31 +200,31 @@ M2, M3, M5 -> M5. Validation evidence, shown in the Lab whatever it reveals.
 | `seam_step.reviewer` | string | Who reviews it before merge (never the owner). |
 | `seam_step.status` | string (pending, done) | pending = not yet run on real data. |
 | `seam_step.label` | string (Measured, Estimated, Indicative, Provisional) | Value label. |
-| `seam_step.result` | object | null | Shape defined by the owner (M2 or M5); to be closed by M3 once delivered. |
+| `seam_step.result` | object | null | Free-form object defined by whoever ran the check; null while pending. See docs/STAGE_D_RESULTS.md. |
 | `era_b_test` | object | M2 / M3. Terra to Terra U Aqua conversion on 2003-2011. |
 | `era_b_test.owner` | string | Who wrote the check. |
 | `era_b_test.reviewer` | string | Who reviews it before merge (never the owner). |
 | `era_b_test.status` | string (pending, done) | pending = not yet run on real data. |
 | `era_b_test.label` | string (Measured, Estimated, Indicative, Provisional) | Value label. |
-| `era_b_test.result` | object | null | Shape defined by the owner (M2 or M5); to be closed by M3 once delivered. |
+| `era_b_test.result` | object | null | Free-form object defined by whoever ran the check; null while pending. See docs/STAGE_D_RESULTS.md. |
 | `ratio_trend` | object | M2 / M3. Ratio stability over the learning window. |
 | `ratio_trend.owner` | string | Who wrote the check. |
 | `ratio_trend.reviewer` | string | Who reviews it before merge (never the owner). |
 | `ratio_trend.status` | string (pending, done) | pending = not yet run on real data. |
 | `ratio_trend.label` | string (Measured, Estimated, Indicative, Provisional) | Value label. |
-| `ratio_trend.result` | object | null | Shape defined by the owner (M2 or M5); to be closed by M3 once delivered. |
+| `ratio_trend.result` | object | null | Free-form object defined by whoever ran the check; null while pending. See docs/STAGE_D_RESULTS.md. |
 | `res_sensitivity` | object | M1 data, M3 compare / M5. Top periods at res 5/6/7. |
 | `res_sensitivity.owner` | string | Who wrote the check. |
 | `res_sensitivity.reviewer` | string | Who reviews it before merge (never the owner). |
 | `res_sensitivity.status` | string (pending, done) | pending = not yet run on real data. |
 | `res_sensitivity.label` | string (Measured, Estimated, Indicative, Provisional) | Value label. |
-| `res_sensitivity.result` | object | null | Shape defined by the owner (M2 or M5); to be closed by M3 once delivered. |
+| `res_sensitivity.result` | object | null | Free-form object defined by whoever ran the check; null while pending. See docs/STAGE_D_RESULTS.md. |
 | `nrt_seam` | object | M1 pairs, M2 / M3. NRT vs SP shift on the same satellite. |
 | `nrt_seam.owner` | string | Who wrote the check. |
 | `nrt_seam.reviewer` | string | Who reviews it before merge (never the owner). |
 | `nrt_seam.status` | string (pending, done) | pending = not yet run on real data. |
 | `nrt_seam.label` | string (Measured, Estimated, Indicative, Provisional) | Value label. |
-| `nrt_seam.result` | object | null | Shape defined by the owner (M2 or M5); to be closed by M3 once delivered. |
+| `nrt_seam.result` | object | null | Free-form object defined by whoever ran the check; null while pending. See docs/STAGE_D_RESULTS.md. |
 | `external_check` | object | M3, M6 sources / M1. Yearly Oct-Nov harmonized activity against one outside series. |
 | `external_check.owner` | string | Who wrote the check. |
 | `external_check.reviewer` | string | Who reviews it before merge (never the owner). |
@@ -342,7 +342,7 @@ M3 -> M4. Daily series for the three presets only.
 | `presets.<preset>.lo` | array[number | null] | Lower range. |
 | `presets.<preset>.hi` | array[number | null] | Upper range. |
 | `presets.<preset>.frac_burning` | array[number | null] | harm / tile_count; above about 0.5 = near saturation. |
-| `presets.<preset>.pct_rank` | array[number | null] | Position 0-100 of harm among all years within +/-7 days of the same day of year. [verify definition] |
+| `presets.<preset>.pct_rank` | array[number | null] | Position 0-100 of harm among all years within +/-7 days of the same day of year. |
 | `presets.<preset>.label` | array[integer] | Label code per day. |
 
 ### climatology: `climatology.json`
@@ -468,14 +468,14 @@ M1, M2, M3 -> M6. Index of shipped files, hashes, provenance and shared lookups.
 | `relay_satellite` | string | Relay sensor set in use. |
 | `firms_download_dates` | object | Product -> download date (M1). |
 | `product_versions` | object | Product -> version (M1). |
-| `model_version` | string | null | Conversion model version (M2). |
+| `model_version` | string | null | Conversion model version. |
 | `boundary` | object |  |
 | `boundary.source` | string | null | Boundary source. |
 | `boundary.licence` | string | null | Licence. |
 | `ai_use_note` | string | AI-tools disclosure. |
 | `safety_disclaimer` | string | Shown on every screen. |
 | `budget_mb` | number | Size budget. |
-| `precache` | array[string] | Files the service worker precaches (plan s5). |
+| `precache` | array[string] | Files the service worker precaches: paths relative to the data folder. |
 | `files` | array[object] |  |
 | `files[].path` | string | Path relative to web/public/data. |
 | `files[].contract` | string | Contract name. |
@@ -488,7 +488,7 @@ M1 -> M4. Fetched only on download click; budgeted separately. Header:
 
 `satellite,date,time_utc,local_solar_time,lat,lon,frp,confidence,day_night,product`
 
-## Pipeline hand-offs (`data/processed/`, git-ignored)
+## Pipeline hand-offs (repo-root `data/processed/`, git-ignored)
 
 ### tile_day: `tile_day.parquet`
 
@@ -508,7 +508,7 @@ M1 -> M2, M3. Sparse: one row per region, res-6 tile, local solar date and senso
 
 ### tiles: `tiles.parquet`
 
-M1 -> M3. [verify: M3 request, not in the plan] Every in-scope res-6 tile, including tiles that never burn; needed for geometry and tile counts.
+M1 -> M3. Every in-scope res-6 tile, including tiles that never burn; needed for geometry and tile counts.
 
 | column | kind |
 |---|---|

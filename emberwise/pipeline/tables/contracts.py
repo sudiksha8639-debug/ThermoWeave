@@ -92,14 +92,14 @@ def col(base: dict, desc: str) -> dict:
 REGIONS = contract({
     "regions": arr(obj({
         "id": string("Region id used as a key in other files."),
-        "label": string("Display label. Results are always labelled 'Indian Punjab and Haryana' style."),
+        "label": string("Display label."),
         "kind": string("preset = selectable in the app; control = Lab negative control only.",
                        enum=["preset", "control"]),
         "default": boolean("true for the preset the app opens with."),
         "tiles_in_scope": obj({f"r{r}": integer(f"Tiles whose centroid is inside, H3 res {r}.", null=(r != C.H3_RES))
                                for r in C.SENSITIVITY_RES},
                               "Clipped tile counts; r6 is the saturation cap. r5/r7 are null where M1 has not supplied them."),
-        "boundary_source": string("Boundary data source and licence."),
+        "boundary_source": string("Boundary data source."),
         "bbox": arr(num(), "[west, south, east, north] in degrees.", n=4),
     })),
 }, "M6, M1 -> M3, M4. Three presets and the control district.")
@@ -120,7 +120,7 @@ COVERAGE = contract({
 HOURLY = contract({
     "satellites": arr(string(), "Satellite names; code = index."),
     "columns": obj({
-        "region": col(arr(integer()), "Index into regions presets order (punjab, haryana, punjab_haryana)."),
+        "region": col(arr(integer()), "Preset index (manifest.presets)."),
         "satellite": col(arr(integer()), "Satellite code."),
         "year": col(arr(integer()), "Year."),
         "month": col(arr(integer()), "Month 1-12."),
@@ -194,7 +194,20 @@ def typed(props: dict) -> dict:
 
 
 OPEN_RESULT = _d({"type": ["object", "null"]},
-                 "Shape defined by the owner (M2 or M5); to be closed by M3 once delivered.")
+                 "Free-form object defined by whoever ran the check; null while pending. See docs/STAGE_D_RESULTS.md.")
+_COMPARE = {
+    "per_zone_month": num("Error of the per zone-month conversion.", null=True),
+    "global_ratio": num("Error using one global ratio.", null=True),
+    "no_conversion": num("Error using raw MODIS tile-days.", null=True),
+    "beats_both": boolean("per_zone_month lower than both baselines.", null=True),
+}
+_RANK = {
+    "method": string("How seasonality was removed."),
+    "rho": num("Spearman rho, as found.", null=True),
+    "threshold": num("Pass mark."),
+    "passed": boolean("rho >= threshold.", null=True),
+    "n": integer("Pairs."),
+}
 
 VALIDATION = contract({
     "hide_a_year": check(obj({
@@ -209,32 +222,14 @@ VALIDATION = contract({
     "error_by_level": check(OPEN_RESULT, "M2 / M3. Hide-a-year error and bias by activity third."),
     "baselines": check(typed({
         "metric": string("Error metric."),
-        "n": integer("Region-years compared."),
-        "per_zone_month": num("Error of the per zone-month conversion.", null=True),
-        "global_ratio": num("Error using one global ratio.", null=True),
-        "no_conversion": num("Error using raw MODIS tile-days.", null=True),
-        "beats_both": boolean("per_zone_month lower than both baselines.", null=True),
-        "zone_month_level": obj({
-            "n": integer("Zone-month-years compared."),
-            "per_zone_month": num("Error of the per zone-month conversion.", null=True),
-            "global_ratio": num("Error using one global ratio.", null=True),
-            "no_conversion": num("Error using raw MODIS tile-days.", null=True),
-            "beats_both": boolean("per_zone_month lower than both baselines.", null=True),
-        }, "The same comparison for each zone, month and hidden year (finer than a preset-year).", null=True),
+        "n": integer("Preset-years compared."),
+        **_COMPARE,
+        "zone_month_level": obj({"n": integer("Zone-month-years compared."), **_COMPARE},
+                                "The same comparison for each zone, month and hidden year.", null=True),
     }), "M3 / M1. Per zone-month conversion against two simpler baselines, at preset-year level."),
     "rank_test": check(typed({
-        "method": string("How seasonality was removed."),
-        "rho": num("Spearman rho, as found.", null=True),
-        "threshold": num("Pass mark."),
-        "passed": boolean("rho >= threshold.", null=True),
-        "n": integer("Pairs."),
-        "other_method": obj({
-            "method": string("The alternative way of removing seasonality."),
-            "rho": num("Spearman rho, as found.", null=True),
-            "threshold": num("Pass mark."),
-            "passed": boolean("rho >= threshold.", null=True),
-            "n": integer("Pairs."),
-        }, "The same test by the other allowed method, reported for transparency.", null=True),
+        **_RANK,
+        "other_method": obj(dict(_RANK), "The same test by the other allowed method.", null=True),
     }), "M3 / M1. Does the harmonized record rank periods the way VIIRS does?"),
     "seam_step": check(OPEN_RESULT, "M5 / M2. Size of the 2012 step before and after harmonizing."),
     "era_b_test": check(OPEN_RESULT, "M2 / M3. Terra to Terra U Aqua conversion on 2003-2011."),
@@ -325,7 +320,7 @@ REGION_DAILY = contract({
         "lo": col(NNUM, "Lower range."),
         "hi": col(NNUM, "Upper range."),
         "frac_burning": col(NNUM, "harm / tile_count; above about 0.5 = near saturation."),
-        "pct_rank": col(NNUM, "Position 0-100 of harm among all years within +/-7 days of the same day of year. [verify definition]"),
+        "pct_rank": col(NNUM, "Position 0-100 of harm among all years within +/-7 days of the same day of year."),
         "label": col(arr(integer()), "Label code per day."),
     })),
 }, "M3 -> M4. Daily series for the three presets only.")
@@ -408,12 +403,12 @@ MANIFEST = contract({
                                "Product -> download date (M1)."),
     "product_versions": _d({"type": "object", "additionalProperties": {"type": ["string", "null"]}},
                            "Product -> version (M1)."),
-    "model_version": string("Conversion model version (M2).", null=True),
+    "model_version": string("Conversion model version.", null=True),
     "boundary": obj({"source": string("Boundary source.", null=True), "licence": string("Licence.", null=True)}),
     "ai_use_note": string("AI-tools disclosure."),
     "safety_disclaimer": string("Shown on every screen."),
     "budget_mb": num("Size budget."),
-    "precache": arr(string(), "Files the service worker precaches (plan s5)."),
+    "precache": arr(string(), "Files the service worker precaches: paths relative to the data folder."),
     "files": arr(obj({"path": string("Path relative to web/public/data."),
                       "contract": string("Contract name."),
                       "bytes": integer("Uncompressed size."),
@@ -440,8 +435,8 @@ PARQUET: dict[str, tuple[str, dict[str, str], str]] = {
        "clean DAY-pass hotspot (plan s2: day passes only for the headline). n_tile_day is 1 per row; "
        "MODIS_ALL is the union of Terra and Aqua flags, never a sum. region is punjab, haryana or control."),
     "tiles": ("tiles.parquet", {"region": "str", "h3_r6": "str", "zone_r3": "str"},
-              "M1 -> M3. [verify: M3 request, not in the plan] Every in-scope res-6 tile, including tiles "
-              "that never burn; needed for geometry and tile counts."),
+              "M1 -> M3. Every in-scope res-6 tile, including tiles that never burn; "
+              "needed for geometry and tile counts."),
 }
 _KINDS = {"str": (pl.String, pl.Categorical, pl.Enum), "date": (pl.Date,),
           "float": (pl.Float32, pl.Float64),
@@ -557,8 +552,9 @@ def validate_hotspots_csv(path: Path) -> list[str]:
     return [] if first == [want] else [f"header {first} != expected [{want}]"]
 
 
-def validate_tree(data_dir: Path = C.DATA_DIR, processed_dir: Path = C.PROCESSED_DIR) -> dict[str, list[str]]:
+def validate_tree(data_dir: Path | None = None, processed_dir: Path | None = None) -> dict[str, list[str]]:
     """Validate everything on disk. Missing files and files outside the contract are errors."""
+    data_dir, processed_dir = Path(data_dir or C.DATA_DIR), Path(processed_dir or C.PROCESSED_DIR)
     report: dict[str, list[str]] = {}
     known: set[Path] = set()
     for name, (_, pattern) in CONTRACTS.items():
@@ -581,7 +577,7 @@ def validate_tree(data_dir: Path = C.DATA_DIR, processed_dir: Path = C.PROCESSED
         report[f"processed/{fname}"] = validate_parquet(name, p) if p.exists() else ["file missing"]
     man = data_dir / "manifest.json"
     if man.exists() and not report.get("manifest.json"):
-        listed = {f["path"]: f["bytes"] for f in json.loads(man.read_text())["files"]}
+        listed = {f["path"]: f["bytes"] for f in json.loads(man.read_text(encoding="utf-8"))["files"]}
         on_disk = {p.relative_to(data_dir).as_posix(): p.stat().st_size for p in data_dir.rglob("*")
                    if p.is_file() and p.name != "manifest.json"}
         if listed != on_disk:

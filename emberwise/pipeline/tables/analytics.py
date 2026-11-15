@@ -1,6 +1,5 @@
 """Climatology, critical periods, this-month logic, Local Normal and sentences (plan s6).
 
-Stage A versions used to fill the tables; Stage B hardens them and adds unit tests.
 All inputs are 1-D daily arrays indexed by days since config.EPOCH; NaN = missing.
 Sentences are template-written; every number comes from code.
 """
@@ -77,6 +76,7 @@ def doy_percentile(x: np.ndarray, doy: np.ndarray, pct: float, window: int) -> n
 
 def pct_rank(x: np.ndarray, doy: np.ndarray, window: int = C.PERIOD_DOY_WINDOW) -> np.ndarray:
     """Position 0-100 of each day among all years within +/- window days of its day of year."""
+    x = np.asarray(x, float)
     out = np.full(len(x), np.nan)
     for d, vals in _doy_pools(x, doy, window):
         sel = (doy == d) & ~np.isnan(x)
@@ -113,12 +113,12 @@ def _runs(flag: np.ndarray, max_gap: int, min_days: int) -> list[tuple[int, int]
     return [(int(a), int(b)) for a, b in runs if b - a + 1 >= min_days]
 
 
-def anomaly_runs(series, tile_count: int, cal: dict) -> tuple[list[tuple[int, int]], np.ndarray, np.ndarray, np.ndarray]:
+def anomaly_runs(series, tile_count: int, cal: dict):
     """Runs of days whose 7-day rolling value exceeds its day-of-year P90.
 
-    Returns (runs, roll, p90, p50). Used by critical periods and by the negative control,
-    so both apply exactly the same rule: P90 over a +/-7-day window across years,
-    gaps of 1 day or less merged, runs of 3+ days kept.
+    Returns (runs, roll, p90, p50). Used by critical periods, the negative control and the
+    resolution check, so all apply exactly the same rule: P90 over a +/-7-day window across
+    years, gaps of 1 day or less merged, runs of 3+ days kept.
     """
     roll = rolling_mean(series, C.PERIOD_ROLL_DAYS)
     p90 = doy_percentile(roll, cal["doy"], C.PERIOD_PERCENTILE, C.PERIOD_DOY_WINDOW)

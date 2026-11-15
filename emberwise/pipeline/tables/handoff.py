@@ -3,7 +3,7 @@
 M1 writes into the repo-root data/processed folder:
   tile_day.parquet, tiles.parquet   contract shape, validated by check_contract
   regions.json                      M1's own shape (tile lists, counts, boundary source)
-  coverage.parquet                  date, sensor_set, product, has_data (+ extra columns, ignored)
+  coverage.parquet                  date, sensor_set, has_data (+ product, suspect_gap, extras)
 
 This module writes into web/public/data: regions.json, coverage.json, and, while
 config.USE_FALLBACK_CONVERSION is True, conversion.json, the hide-a-year block of
@@ -21,7 +21,7 @@ import polars as pl
 from . import config as C
 from . import conversion as CV
 from .jsonio import envelope, read_json, write_json
-from .timeutil import day_index, parse
+from .timeutil import day_index, index_day, parse
 
 FALLBACK_MODEL = "M3 fallback fit of the plan s6 method from tile_day; not yet reviewed or replaced by M2"
 
@@ -32,14 +32,25 @@ def _bbox(cells: list[str]) -> list[float]:
     return [round(float(v), 2) for v in (ll[:, 1].min(), ll[:, 0].min(), ll[:, 1].max(), ll[:, 0].max())]
 
 
-def regions_from_m1(m1: dict, tiles: pl.DataFrame) -> dict:
+def control_label(boundary_dir: Path | None = None) -> str:
+    """Name of the control district, read from M1's control_district.geojson when it is there."""
+    path = Path(boundary_dir or C.BOUNDARY_DIR) / "control_district.geojson"
+    if path.exists():
+        props = json.loads(path.read_text(encoding="utf-8"))["features"][0]["properties"]
+        if props.get("district"):
+            name = str(props["district"]).title().replace(" And ", " and ")
+            return f"{name}, {props.get('state_name', '')} (control district)".replace(",  (", " (")
+    return C.CONTROL_REGION["label"]
+
+
+def regions_from_m1(m1: dict, tiles: pl.DataFrame, control: str | None = None) -> dict:
     """regions.json body from M1's regions file and tiles.parquet.
 
     r6 counts come from tiles.parquet. r5 and r7 are known only for the combined preset
     (M1's in_scope_tile_count); they are null elsewhere rather than guessed.
     """
     counts = m1.get("in_scope_tile_count", {})
-    source = m1.get("boundary_source", "[verify] boundary source not supplied")
+    source = m1.get("boundary_source", "boundary source not supplied")
     out = []
     for p in C.PRESETS:
         cells = tiles.filter(pl.col("region").is_in(p["parts"]))["h3_r6"].to_list()
@@ -51,12 +62,12 @@ def regions_from_m1(m1: dict, tiles: pl.DataFrame) -> dict:
                  for r in C.SENSITIVITY_RES}
         out.append({"id": p["id"], "label": p["label"], "kind": "preset", "default": whole,
                     "tiles_in_scope": scope, "boundary_source": source, "bbox": _bbox(cells)})
-    control = tiles.filter(pl.col("region") == C.CONTROL_REGION["id"])["h3_r6"].to_list()
-    if control:
-        out.append({"id": C.CONTROL_REGION["id"], "label": C.CONTROL_REGION["label"], "kind": "control",
+    cells = tiles.filter(pl.col("region") == C.CONTROL_REGION["id"])["h3_r6"].to_list()
+    if cells:
+        out.append({"id": C.CONTROL_REGION["id"], "label": control or C.CONTROL_REGION["label"], "kind": "control",
                     "default": False,
-                    "tiles_in_scope": {f"r{r}": (len(control) if r == C.H3_RES else None) for r in C.SENSITIVITY_RES},
-                    "boundary_source": source, "bbox": _bbox(control)})
+                    "tiles_in_scope": {f"r{r}": (len(cells) if r == C.H3_RES else None) for r in C.SENSITIVITY_RES},
+                    "boundary_source": source, "bbox": _bbox(cells)})
     return {"regions": out}
 
 # ------------------------------------------------------------------ coverage
@@ -137,13 +148,12 @@ def coverage_from_tile_day(td: pl.DataFrame, n_days: int) -> list[tuple]:
 
 def last_covered_day(runs: list[tuple]) -> str:
     """Last date on which MODIS or the VIIRS source of truth has data: the 'as of' date of the build."""
-    from .timeutil import index_day
     snpp_end = day_index(C.SNPP_END)
     last = -1
     for sset, _, a, b, ok in runs:
         if not ok:
             continue
-        if sset == C.MODIS_SET or sset == C.RELAY_SET:
+        if sset in (C.MODIS_SET, C.RELAY_SET):
             last = max(last, b)
         elif sset == C.SNPP_SET:
             last = max(last, min(b, snpp_end))
@@ -166,13 +176,13 @@ def pending(name: str, result) -> dict:
             "label": "Measured", "result": result}
 
 
-def validation_skeleton(hide_cols: dict | None) -> dict:
+def validation_skeleton(hide_cols: dict | None = None) -> dict:
     """validation.json body: every key present; hide-a-year filled when the fallback fit ran."""
     lo, hi = C.NEG_CONTROL_YEARS
-    v = {"hide_a_year": pending("hide_a_year", {"columns": hide_cols or
-                                                {k: [] for k in ("region", "year", "predicted", "actual", "in_range")}})}
+    empty = {k: [] for k in ("region", "year", "predicted", "actual", "in_range")}
+    v = {"hide_a_year": pending("hide_a_year", {"columns": hide_cols or empty})}
     if hide_cols:
-        v["hide_a_year"].update(status="done", owner="M3", reviewer="M2")     # fallback: M3 wrote it, M2 reviews
+        v["hide_a_year"].update(status="done", owner="M3", reviewer=C.FALLBACK_REVIEWER)
     v["error_by_level"] = pending("error_by_level", None)
     v["baselines"] = pending("baselines", {"metric": "mean absolute percent error", "n": 0, "per_zone_month": None,
                                            "global_ratio": None, "no_conversion": None, "beats_both": None,
@@ -217,7 +227,8 @@ def prepare(data_dir: Path, processed_dir: Path) -> dict:
     notes = {"model_version": None}
 
     m1 = json.loads((processed_dir / "regions.json").read_text(encoding="utf-8"))
-    write_json(data_dir / "regions.json", {**env, **regions_from_m1(m1, tiles)})
+    boundary = processed_dir.parent / "boundary"
+    write_json(data_dir / "regions.json", {**env, **regions_from_m1(m1, tiles, control_label(boundary))})
 
     cov_path = processed_dir / "coverage.parquet"
     if cov_path.exists():
@@ -225,24 +236,24 @@ def prepare(data_dir: Path, processed_dir: Path) -> dict:
     else:
         runs, notes["coverage"] = coverage_from_tile_day(td, n_days), "STAND-IN inferred from tile_day"
     write_json(data_dir / "coverage.json", {**env, **coverage_json(runs)})
-    as_of = last_covered_day(runs)
-    notes["as_of"] = as_of
+    as_of = notes["as_of"] = last_covered_day(runs)
     td = td.filter(pl.col("date") <= parse(as_of))
 
     if C.USE_FALLBACK_CONVERSION:
         zones = sorted(tiles.filter(pl.col("region").is_in(C.BASE_REGIONS))["zone_r3"].unique().to_list())
-        cube = CV.monthly_cube(td, zones, parse(as_of).year)
+        cube = CV.monthly_cube(td, zones, C.LEARNING_WINDOW[0], parse(as_of).year)
         body, widen = CV.build_conversion(cube, zones)
         write_json(data_dir / "conversion.json", {**env, **body})
         write_json(data_dir / "validation.json", {**env, **validation_skeleton(CV.hide_a_year(cube, widen["B"]))})
         relay = CV.relay_simulation(td)
         if relay:
-            write_json(data_dir / "relay_sim.json", {**env, **relay})
-        notes.update(model_version=FALLBACK_MODEL, widen=widen)
+            write_json(data_dir / "relay_sim.json", {**env, **relay[0]})
+            notes["relay_alignment_factor"] = round(relay[1], 4)
+        notes.update(model_version=FALLBACK_MODEL, widen={k: round(v, 4) for k, v in widen.items()})
 
     (data_dir / "hotspots").mkdir(parents=True, exist_ok=True)
     for old in (data_dir / "hotspots").glob("*.csv"):
-        if old.stat().st_size < 200:                         # header-only placeholders from the mocks
+        if old.stat().st_size < 200:                         # header-only placeholders
             old.unlink()
     for pid in C.PRESET_IDS:
         f = data_dir / "hotspots" / f"hotspots_{pid}_{as_of[:4]}.csv"

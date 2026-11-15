@@ -1,15 +1,16 @@
-"""MODIS -> VIIRS-scale conversion, fitted from tile_day (plan s6). M3's fallback for M2's deliverable.
+"""MODIS -> VIIRS-scale conversion and its tests, fitted from tile_day (plan s6, s7).
 
-Method, exactly as the plan states it:
+M3's fallback for M2's deliverables. Method, exactly as the plan states it:
   * zones are H3 res-3 cells; one ratio per zone and calendar month;
   * learned on 2012-2019 only, twice: Terra-only -> VIIRS (era A) and Terra U Aqua -> VIIRS (era B);
   * small-sample shrinkage: r = (sum V + k * r_region,m) / (sum M + k), k about 20 tile-days;
   * base range = 10th to 90th percentile of the yearly ratios;
   * widened range = base range widened by the 80th percentile of the absolute relative error
-    found when each year is hidden and predicted from the others.
+    found when each year is hidden and predicted from the others (hide-a-year).
 
-Use only while config.USE_FALLBACK_CONVERSION is True. When M2 delivers conversion.json and the
-hide-a-year block of validation.json, those files replace the output of this module.
+Used only while config.USE_FALLBACK_CONVERSION is True. M2's conversion.json and validation
+blocks replace the output of this module when they arrive.
+Not built here: the fraction-burning alternative fit and the NRT factor (needs M1's NRT/SP pairs).
 """
 from __future__ import annotations
 
@@ -17,6 +18,7 @@ from datetime import date
 
 import numpy as np
 import polars as pl
+from scipy.stats import spearmanr
 
 from . import config as C
 from .timeutil import day_index, index_day, parse
@@ -29,21 +31,21 @@ def _div(a, b):
         return np.where(b > 0, a / b, np.nan)
 
 
-def monthly_cube(td: pl.DataFrame, zones: list[str], last_year: int) -> dict:
-    """{sensor_set: array[base region, zone, year, month]} of day-pass tile-days, 2012 onward.
+def monthly_cube(td: pl.DataFrame, zones: list[str], first_year: int, last_year: int) -> dict:
+    """{sensor_set: array[base region, zone, year, month]} of day-pass tile-days.
 
-    Only the Suomi NPP period is used, and January 2012 is left out because VIIRS starts on the 20th.
+    Only days up to the end of the Suomi NPP record are used, and January 2012 is left out
+    because VIIRS starts on the 20th.
     """
-    y0 = C.LEARNING_WINDOW[0]
     g = (td.filter(pl.col("region").is_in(C.BASE_REGIONS) & (pl.col("date") <= parse(C.SNPP_END))
-                   & (pl.col("date").dt.year() >= y0))
+                   & pl.col("date").dt.year().is_between(first_year, last_year))
          .group_by("region", "zone_r3", pl.col("date").dt.year().alias("y"),
                    pl.col("date").dt.month().alias("m"), "sensor_set").agg(pl.col("n_tile_day").sum().alias("n")))
     zi = {z: i for i, z in enumerate(zones)}
-    cube = {s: np.zeros((len(C.BASE_REGIONS), len(zones), last_year - y0 + 1, 12)) for s in C.SENSOR_SETS}
+    cube = {s: np.zeros((len(C.BASE_REGIONS), len(zones), last_year - first_year + 1, 12)) for s in C.SENSOR_SETS}
     for r, z, y, m, s, n in g.iter_rows():
-        if (y, m) != (y0, 1) and s in cube and z in zi:
-            cube[s][C.BASE_REGIONS.index(r), zi[z], y - y0, m - 1] = n
+        if (y, m) != (C.LEARNING_WINDOW[0], 1) and s in cube and z in zi:
+            cube[s][C.BASE_REGIONS.index(r), zi[z], y - first_year, m - 1] = n
     return cube
 
 
@@ -51,7 +53,7 @@ def fit_ratio(V: np.ndarray, M: np.ndarray, k: float = C.K_SUPPORT) -> dict:
     """Fit zone-month ratios from V and M of shape [zone, year, month].
 
     Returns ratio, lo, hi (each [zone, 12]) and n_support. If a calendar month has no MODIS
-    tile-days anywhere in the region, the all-month regional ratio is used as the shrinkage target.
+    tile-days anywhere in the region, the all-month regional ratio is the shrinkage target.
     """
     r_month = _div(V.sum(axis=(0, 1)), M.sum(axis=(0, 1)))
     r_all = _div(V.sum(), M.sum())
@@ -63,23 +65,17 @@ def fit_ratio(V: np.ndarray, M: np.ndarray, k: float = C.K_SUPPORT) -> dict:
     return {"ratio": ratio, "lo": lo, "hi": hi, "n_support": M.sum(axis=1)}
 
 
-def hidden_year_errors(V: np.ndarray, M: np.ndarray, min_actual: float = C.CONVERSION_MIN_ACTUAL) -> np.ndarray:
-    """Absolute relative errors of zone-month predictions when each year is hidden in turn."""
-    errs = []
-    n_years = V.shape[1]
-    for yi in range(n_years):
-        keep = np.arange(n_years) != yi
-        fit = fit_ratio(V[:, keep], M[:, keep])
-        pred, actual = M[:, yi] * fit["ratio"], V[:, yi]
-        ok = actual >= min_actual
-        errs.append(np.abs(pred[ok] - actual[ok]) / actual[ok])
-    return np.concatenate(errs) if errs else np.array([])
-
-
 def preset_parts(pid: str) -> list[int]:
     """Indexes of the base regions that make up a preset."""
     return [C.BASE_REGIONS.index(r) for r in next(p for p in C.PRESETS if p["id"] == pid)["parts"]]
 
+
+def learning_slice() -> slice:
+    """Index range of the learning window inside a cube that starts in its first year."""
+    y0, y1 = C.LEARNING_WINDOW
+    return slice(0, y1 - y0 + 1)
+
+# --------------------------------------------------------------- hide-a-year
 
 def hide_a_year_rows(V: np.ndarray, M: np.ndarray) -> list[dict]:
     """Hide each year, predict it per preset from MODIS alone. V, M: [region, zone, year, month]."""
@@ -105,11 +101,17 @@ def widening(rows: list[dict]) -> float:
     return float(np.percentile(e, 80)) if e else 0.0
 
 
-def learning_slice() -> slice:
-    """Index range of the learning window inside the cube's year axis."""
-    y0, y1 = C.LEARNING_WINDOW
-    return slice(0, y1 - y0 + 1)
+def hide_a_year(cube: dict, widen_b: float) -> dict:
+    """The `columns` object of validation.hide_a_year.result (era B source: Terra U Aqua)."""
+    L = learning_slice()
+    cols = {k: [] for k in ("region", "year", "predicted", "actual", "in_range")}
+    for r in hide_a_year_rows(cube[C.SNPP_SET][:, :, L], cube[C.MODIS_SET][:, :, L]):
+        cols["region"].append(r["region"]); cols["year"].append(C.LEARNING_WINDOW[0] + r["year_index"])
+        cols["predicted"].append(round(r["ratio"], C.Q_VALUE)); cols["actual"].append(r["actual"])
+        cols["in_range"].append(bool(r["lo"] * (1 - widen_b) <= r["actual"] <= r["hi"] * (1 + widen_b)))
+    return cols
 
+# ---------------------------------------------------------------- conversion
 
 def build_conversion(cube: dict, zones: list[str]) -> tuple[dict, dict]:
     """conversion.json body (no envelope) and the widening used per era."""
@@ -143,20 +145,98 @@ def build_conversion(cube: dict, zones: list[str]) -> tuple[dict, dict]:
             "k": C.K_SUPPORT, "zones": zones, "columns": cols, "ratio_by_year": {"columns": rby}}
     return body, widen
 
+# ------------------------------------------------- M2's other checks (fallback)
 
-def hide_a_year(cube: dict, widen_b: float) -> dict:
-    """The `columns` object of validation.hide_a_year.result (era B source: Terra U Aqua)."""
+def error_by_level(cube: dict) -> dict:
+    """Hide-a-year error and bias for low, middle and high activity (plan s7).
+
+    Each zone, month and hidden year is one case; cases are split into thirds by the VIIRS
+    tile-days actually seen. bias > 0 means the conversion predicts too much.
+    """
     L = learning_slice()
-    cols = {k: [] for k in ("region", "year", "predicted", "actual", "in_range")}
-    for r in hide_a_year_rows(cube[C.SNPP_SET][:, :, L], cube[C.MODIS_SET][:, :, L]):
-        cols["region"].append(r["region"]); cols["year"].append(C.LEARNING_WINDOW[0] + r["year_index"])
-        cols["predicted"].append(round(r["ratio"], C.Q_VALUE)); cols["actual"].append(r["actual"])
-        cols["in_range"].append(bool(r["lo"] * (1 - widen_b) <= r["actual"] <= r["hi"] * (1 + widen_b)))
-    return cols
+    V, M = cube[C.SNPP_SET].sum(axis=0)[:, L], cube[C.MODIS_SET].sum(axis=0)[:, L]
+    actual, pred = [], []
+    for yi in range(V.shape[1]):
+        keep = np.arange(V.shape[1]) != yi
+        fit = fit_ratio(V[:, keep], M[:, keep])
+        ok = V[:, yi] >= C.CONVERSION_MIN_ACTUAL
+        actual += V[:, yi][ok].tolist()
+        pred += (M[:, yi] * fit["ratio"])[ok].tolist()
+    actual, pred = np.array(actual), np.array(pred)
+    if not len(actual):
+        return {"levels": [], "note": "no zone-month reached the minimum activity"}
+    cuts = np.percentile(actual, [100 / 3, 200 / 3])
+    levels = []
+    for name, sel in (("low", actual <= cuts[0]), ("middle", (actual > cuts[0]) & (actual <= cuts[1])),
+                      ("high", actual > cuts[1])):
+        if not sel.any():
+            continue
+        rel = (pred[sel] - actual[sel]) / actual[sel]
+        levels.append({"level": name, "n": int(sel.sum()),
+                       "tile_days_from": round(float(actual[sel].min()), 0), "tile_days_to": round(float(actual[sel].max()), 0),
+                       "abs_error_pct": round(100 * float(np.mean(np.abs(rel))), 1),
+                       "bias_pct": round(100 * float(np.mean(rel)), 1)})
+    return {"unit": "one zone, month and hidden year", "levels": levels}
 
 
-def relay_simulation(td: pl.DataFrame) -> dict | None:
-    """Sensor-Loss simulation on the last full Oct-Nov season (relay_sim.json body), or None.
+def era_b_test(td: pl.DataFrame, zones: list[str]) -> dict:
+    """Terra -> Terra U Aqua, learned on 2012-2019 and tested on 2003-2011 (plan s2).
+
+    Era A rests on Terra alone. This checks the Terra-to-both-MODIS step on years where both
+    exist but which were not used for learning: predict Terra U Aqua tile-days from Terra.
+    """
+    y0, y1 = C.LEARNING_WINDOW
+    t0, t1 = C.ERA_B_TEST_YEARS
+    learn, test = monthly_cube(td, zones, y0, y1), monthly_cube(td, zones, t0, t1)
+    fit = fit_ratio(learn[C.MODIS_SET].sum(axis=0), learn["TERRA"].sum(axis=0))
+    rel, default = [], []
+    for pid in C.PRESET_IDS:
+        parts = preset_parts(pid)
+        for yi in range(t1 - t0 + 1):
+            pred = float(np.nansum(test["TERRA"][parts].sum(axis=0)[:, yi] * fit["ratio"]))
+            actual = float(test[C.MODIS_SET][parts].sum(axis=0)[:, yi].sum())
+            if actual > 0:
+                rel.append((pred - actual) / actual)
+                if pid == C.DEFAULT_PRESET:
+                    default.append((pred - actual) / actual)
+    if not rel:
+        return {"learned_on": [y0, y1], "tested_on": [t0, t1], "n": 0, "abs_error_pct": None, "bias_pct": None}
+    return {"learned_on": [y0, y1], "tested_on": [t0, t1], "n": len(rel),
+            "abs_error_pct": round(100 * float(np.mean(np.abs(rel))), 1),
+            "bias_pct": round(100 * float(np.mean(rel)), 1),
+            "default_preset_abs_error_pct": round(100 * float(np.mean(np.abs(default))), 1) if default else None,
+            "default_preset_bias_pct": round(100 * float(np.mean(default)), 1) if default else None}
+
+
+def ratio_trend(cube: dict) -> dict:
+    """Is the Oct-Nov VIIRS/MODIS ratio stable? (plan s3, s7.) Default preset, full seasons only."""
+    y0, y1 = C.LEARNING_WINDOW
+    pm = [m - 1 for m in C.PILOT_MONTHS]
+    last_full = parse(C.SNPP_END).year - (0 if parse(C.SNPP_END) >= date(parse(C.SNPP_END).year, 11, 30) else 1)
+    years, ratios = [], []
+    for yi in range(cube[C.SNPP_SET].shape[2]):
+        year = y0 + yi
+        if year > last_full:
+            break
+        r = _div(cube[C.SNPP_SET][:, :, yi][:, :, pm].sum(), cube[C.MODIS_SET][:, :, yi][:, :, pm].sum())
+        if not np.isnan(r):
+            years.append(year); ratios.append(float(r))
+    yrs, rat = np.array(years), np.array(ratios)
+    inside, after = yrs <= y1, yrs > y1
+    varies = inside.sum() >= 3 and np.ptp(rat[inside]) > 0
+    rho = float(spearmanr(yrs[inside], rat[inside]).statistic) if varies else float("nan")
+    m_in = float(rat[inside].mean()) if inside.any() else float("nan")
+    m_after = float(rat[after].mean()) if after.any() else float("nan")
+    num = lambda x, d=3: None if np.isnan(x) else round(x, d)   # noqa: E731
+    return {"months": C.PILOT_MONTHS, "years": years, "ratio": [round(r, 3) for r in ratios],
+            "rho_within_learning_window": num(rho), "mean_ratio_learning_window": num(m_in),
+            "mean_ratio_after": num(m_after),
+            "pct_change_after": num(100 * (m_after - m_in) / m_in, 1) if m_in == m_in and m_after == m_after else None}
+
+# ------------------------------------------------------------- Sensor-Loss sim
+
+def relay_simulation(td: pl.DataFrame) -> tuple[dict, float] | None:
+    """Sensor-Loss simulation on the last full Oct-Nov season: (relay_sim.json body, alignment factor).
 
     The relay satellite is scaled to Suomi NPP using the other seasons they share, then the
     last full season is rebuilt from the relay alone and compared with what Suomi NPP saw.
@@ -181,5 +261,6 @@ def relay_simulation(td: pl.DataFrame) -> dict | None:
         cols["date"].append(i); cols["suomi_actual"].append(actual)
         cols["relay_built"].append(round(built, C.Q_VALUE))
         cols["pct_diff"].append(round(100 * (built - actual) / actual, 1) if actual else None)
-    return {"region": C.DEFAULT_PRESET, "season": season, "relay_satellite": C.RELAY_SATELLITE_NAME,
+    body = {"region": C.DEFAULT_PRESET, "season": season, "relay_satellite": C.RELAY_SATELLITE_NAME,
             "overlap_years": overlap, "epoch": C.EPOCH, "columns": cols}
+    return body, float(align)

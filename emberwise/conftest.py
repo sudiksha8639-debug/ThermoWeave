@@ -15,6 +15,7 @@ _TMP = Path(tempfile.mkdtemp(prefix="emberwise_tests_"))
 C.DATA_DIR = _TMP / "web" / "public" / "data"
 C.CSV_DIR = C.DATA_DIR / "hotspots"
 C.MOCK_PROCESSED_DIR = C.PROCESSED_DIR = _TMP / "data" / "processed"
+C.BOUNDARY_DIR = _TMP / "data" / "boundary"
 C.EXTERNAL_FILE = _TMP / "data" / "external" / "external_series.csv"
 
 from pipeline.tables import build, mocks  # noqa: E402  (imported after the paths are patched)

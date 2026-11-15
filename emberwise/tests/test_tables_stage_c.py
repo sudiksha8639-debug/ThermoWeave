@@ -1,135 +1,165 @@
-"""Stage C tests: turning M1's hand-off into contract files, and the fallback conversion fit."""
+"""Stage C tests: the hand-off readers, the fallback conversion and the real-pipeline pieces."""
+import json
 from datetime import date
 
 import numpy as np
 import polars as pl
 import pytest
 
+from pipeline.tables import build as B
 from pipeline.tables import config as C
 from pipeline.tables import conversion as CV
 from pipeline.tables import handoff as H
+from pipeline.tables.contracts import validate_file
 from pipeline.tables.timeutil import day_index
 
-TILES = pl.DataFrame({"region": ["punjab", "punjab", "haryana", "control"],
-                      "h3_r6": ["863d14d1fffffff", "864248ad7ffffff", "863d10407ffffff", "863d9a007ffffff"],
-                      "zone_r3": ["833d14fffffffff", "834248fffffffff", "833d10fffffffff", "833d9afffffffff"]})
-M1_REGIONS = {"boundary_source": "test source", "in_scope_tile_count": {"r5": 1, "r6": 3, "r7": 21},
-              "presets": {"indian_punjab": ["863d14d1fffffff", "864248ad7ffffff"], "haryana": ["863d10407ffffff"],
-                          "punjab_haryana": ["863d14d1fffffff", "864248ad7ffffff", "863d10407ffffff"]}}
-
-# ------------------------------------------------------------------- regions
-
-def test_regions_from_m1_counts_and_nulls():
-    reg = {r["id"]: r for r in H.regions_from_m1(M1_REGIONS, TILES)["regions"]}
-    assert set(reg) == set(C.PRESET_IDS) | {"control"}
-    assert reg["punjab_haryana"]["tiles_in_scope"] == {"r5": 1, "r6": 3, "r7": 21} and reg["punjab_haryana"]["default"]
-    assert reg["indian_punjab"]["tiles_in_scope"] == {"r5": None, "r6": 2, "r7": None}      # not guessed
-    assert reg["control"]["kind"] == "control" and reg["control"]["tiles_in_scope"]["r6"] == 1
-    assert reg["haryana"]["boundary_source"] == "test source" and len(reg["haryana"]["bbox"]) == 4
+D = C.DATA_DIR
 
 
-def test_regions_disagreement_is_an_error():
-    bad = {**M1_REGIONS, "presets": {**M1_REGIONS["presets"], "haryana": ["863d14d1fffffff"]}}
-    with pytest.raises(ValueError):
-        H.regions_from_m1(bad, TILES)
+def load(name):
+    return json.loads((D / name).read_text(encoding="utf-8"))
 
-# ------------------------------------------------------------------ coverage
+# ----------------------------------------------------------------- conversion
 
-def test_coverage_from_parquet_makes_runs_and_keeps_gaps(tmp_path):
-    days = [date(2000, 11, d) for d in range(1, 11)]
-    cov = pl.DataFrame({"date": days, "sensor_set": ["MODIS_ALL"] * 10,
-                        "product": ["SP"] * 6 + ["NRT"] * 4,
-                        "has_data": [True] * 3 + [False] * 2 + [True] * 5,
-                        "status": ["x"] * 10})                                   # extra column is ignored
-    cov.write_parquet(tmp_path / "coverage.parquet")
-    runs = H.coverage_from_parquet(tmp_path / "coverage.parquet", n_days=12)
-    assert runs == [("MODIS_ALL", "SP", 0, 2, True), ("MODIS_ALL", "SP", 3, 4, False),
-                    ("MODIS_ALL", "SP", 5, 5, True), ("MODIS_ALL", "NRT", 6, 9, True)]
-    body = H.coverage_json(runs)
-    assert body["columns"]["has_data"] == [True, False, True, True] and body["columns"]["end"] == [2, 4, 5, 9]
+def test_fit_ratio_recovers_a_constant_ratio():
+    M = np.full((2, 8, 12), 100.0)
+    fit = CV.fit_ratio(2.5 * M, M)
+    assert np.allclose(fit["ratio"], 2.5) and np.allclose(fit["lo"], 2.5) and np.allclose(fit["hi"], 2.5)
+    assert fit["n_support"][0, 0] == 800
 
 
-def test_stand_in_coverage_uses_first_last_and_last_sp_day():
-    td = pl.DataFrame({"sensor_set": ["VIIRS_SNPP"] * 3,
-                       "date": [date(2012, 1, 20), date(2026, 7, 31), date(2026, 11, 2)],
-                       "product": ["SP", "SP", "NRT"]})
-    runs = H.coverage_from_tile_day(td, n_days=day_index("2026-11-06") + 1)
-    assert runs == [("VIIRS_SNPP", "SP", day_index("2012-01-20"), day_index("2026-07-31"), True),
-                    ("VIIRS_SNPP", "NRT", day_index("2026-08-01"), day_index("2026-11-02"), True)]
-
-# --------------------------------------------------------------- conversion
-
-def cube_like(ratio_by_zone, years=8, modis=200.0, noise=0.0, seed=0):
-    """V and M of shape [zone, year, month] with a known ratio per zone."""
-    rng = np.random.default_rng(seed)
-    M = np.full((len(ratio_by_zone), years, 12), modis)
-    V = M * np.array(ratio_by_zone)[:, None, None] * (1 + noise * rng.standard_normal(M.shape))
-    return V, M
-
-
-def test_fit_recovers_the_ratio_with_plenty_of_data():
-    V, M = cube_like([2.0, 3.0])
+def test_fit_ratio_shrinks_thin_zones_to_the_region():
+    M = np.zeros((2, 8, 12)); V = np.zeros((2, 8, 12))
+    M[0], V[0] = 1000.0, 2000.0                       # a busy zone with ratio 2
+    M[1, 0, :], V[1, 0, :] = 1.0, 10.0                # one tile-day in one year with ratio 10
     fit = CV.fit_ratio(V, M)
-    assert fit["ratio"][0, 10] == pytest.approx(2.0, abs=0.02) and fit["ratio"][1, 10] == pytest.approx(3.0, abs=0.02)
+    assert fit["ratio"][0, 0] == pytest.approx(2.0, abs=0.01)
+    assert 2.0 < fit["ratio"][1, 0] < 3.0             # pulled almost all the way to the region
     assert (fit["lo"] <= fit["ratio"]).all() and (fit["ratio"] <= fit["hi"]).all()
-    assert fit["n_support"][0, 0] == 8 * 200
 
 
-def test_small_samples_shrink_toward_the_region_ratio():
-    V, M = cube_like([2.0, 3.0])
-    M[1], V[1] = 0.5, 0.5 * 10.0                     # zone 1: almost no data, wild ratio of 10
-    fit = CV.fit_ratio(V, M, k=20)
-    assert 2.0 < fit["ratio"][1, 10] < 3.5           # pulled back near the region ratio (about 2)
+def test_fit_ratio_month_without_modis_uses_the_all_month_ratio():
+    M = np.full((1, 8, 12), 50.0); M[:, :, 6] = 0.0
+    fit = CV.fit_ratio(3.0 * M, M)
+    assert fit["ratio"][0, 6] == pytest.approx(3.0) and not np.isnan(fit["ratio"]).any()
 
 
-def test_empty_zone_month_gets_the_region_ratio_not_null():
-    V, M = cube_like([2.0, 2.0])
-    M[1, :, 6], V[1, :, 6] = 0.0, 0.0
-    fit = CV.fit_ratio(V, M)
-    assert fit["ratio"][1, 6] == pytest.approx(2.0) and fit["n_support"][1, 6] == 0
+def test_hide_a_year_never_sees_the_hidden_year():
+    rng = np.random.default_rng(3)
+    M = rng.uniform(50, 150, (2, 3, 8, 12))
+    V = 2.0 * M
+    V[:, :, 4] = 9.0 * M[:, :, 4]                     # one odd year
+    rows = CV.hide_a_year_rows(V, M)
+    odd = [r for r in rows if r["year_index"] == 4]
+    assert len(rows) == 8 * len(C.PRESET_IDS)
+    assert all(r["ratio"] < 0.3 * r["actual"] for r in odd)          # predicted from the other years only
+    assert CV.widening(rows) > 0
 
 
-def test_widening_is_p80_of_hidden_year_error():
-    V, M = cube_like([2.0, 2.0], noise=0.0)
-    rows = CV.hide_a_year_rows(V[None].repeat(2, axis=0), M[None].repeat(2, axis=0))
-    assert len(rows) == 8 * len(C.PRESET_IDS) and CV.widening(rows) == pytest.approx(0.0, abs=1e-9)
-    V2, M2 = cube_like([2.0, 2.0], noise=0.3, seed=3)
-    noisy = CV.widening(CV.hide_a_year_rows(V2[None].repeat(2, axis=0), M2[None].repeat(2, axis=0)))
-    assert 0 < noisy < 0.3
+def test_conversion_file_has_both_eras_and_widened_ranges():
+    conv = load("conversion.json")
+    c = conv["columns"]
+    assert set(c["era"]) == {"A", "B"} and conv["learning_window"] == list(C.LEARNING_WINDOW) and conv["k"] == C.K_SUPPORT
+    for lo, r, hi, wlo, whi in zip(c["lo"], c["ratio"], c["hi"], c["widened_lo"], c["widened_hi"]):
+        if r is not None:
+            assert wlo <= lo <= r <= hi <= whi
+    assert len(c["zone"]) == 2 * 12 * len(conv["zones"])
 
 
-def test_build_conversion_and_hide_a_year_shapes():
-    zones = ["z_a", "z_b"]
-    V, M = cube_like([2.0, 3.0], years=15, noise=0.05, seed=1)
-    cube = {s: np.zeros((2, 2, 15, 12)) for s in C.SENSOR_SETS}
-    cube[C.SNPP_SET][0], cube[C.MODIS_SET][0], cube["TERRA"][0] = V, M, M * 0.4
-    body, widen = CV.build_conversion(cube, zones)
-    c = body["columns"]
-    assert len(c["zone"]) == 2 * 12 * 2 and set(c["era"]) == {"A", "B"} and set(widen) == {"A", "B"}
-    b_nov = [i for i in range(len(c["zone"])) if c["era"][i] == "B" and c["month"][i] == 11 and c["zone"][i] == 0][0]
-    a_nov = [i for i in range(len(c["zone"])) if c["era"][i] == "A" and c["month"][i] == 11 and c["zone"][i] == 0][0]
-    assert c["ratio"][b_nov] == pytest.approx(2.0, abs=0.1) and c["ratio"][a_nov] == pytest.approx(5.0, abs=0.3)
-    assert c["widened_lo"][b_nov] <= c["lo"][b_nov] <= c["ratio"][b_nov] <= c["hi"][b_nov] <= c["widened_hi"][b_nov]
-    r = body["ratio_by_year"]["columns"]
-    assert sum(r["in_learning_window"]) == 2 * len(C.PILOT_MONTHS) * 8
-    hide = CV.hide_a_year(cube, widen["B"])
-    assert len(hide["year"]) == 8 * len(C.PRESET_IDS) and min(hide["year"]) == 2012 and max(hide["year"]) == 2019
+def test_relay_simulation_shape():
+    relay = load("relay_sim.json")
+    assert relay["region"] == C.DEFAULT_PRESET and len(relay["columns"]["date"]) == 61
+    assert relay["season"] not in relay["overlap_years"]
+
+# ------------------------------------------------------------------- hand-off
+
+def _coverage_file(tmp_path, rows, extra=None):
+    df = pl.DataFrame({"date": [r[0] for r in rows], "sensor_set": [r[1] for r in rows],
+                       "has_data": [r[2] for r in rows], **(extra or {})})
+    df.write_parquet(tmp_path / "coverage.parquet")
+    return tmp_path / "coverage.parquet"
 
 
-def test_validation_skeleton_marks_fallback_owner_and_reviewer():
-    v = H.validation_skeleton({"region": [0], "year": [2012], "predicted": [1.0], "actual": [1.0], "in_range": [True]})
-    assert (v["hide_a_year"]["owner"], v["hide_a_year"]["reviewer"], v["hide_a_year"]["status"]) == ("M3", "M2", "done")
-    assert v["baselines"]["status"] == "pending" and all(b["owner"] != b["reviewer"] for b in v.values())
+def test_coverage_reader_maps_old_names_and_skips_unknown_sets(tmp_path):
+    rows = [(date(2015, 11, 1), "SNPP", True), (date(2015, 11, 2), "SNPP", True), (date(2015, 11, 3), "SNPP", False),
+            (date(2015, 11, 1), "AQUA", True), (date(2015, 11, 1), "N20", True)]
+    runs = H.coverage_from_parquet(_coverage_file(tmp_path, rows, {"product": ["SP"] * 5}), day_index("2015-11-30") + 1)
+    a = day_index("2015-11-01")
+    assert (C.SNPP_SET, "SP", a, a + 1, True) in runs and (C.SNPP_SET, "SP", a + 2, a + 2, False) in runs
+    assert ("VIIRS_NOAA20", "SP", a, a, True) in runs and not any(r[0] == "AQUA" for r in runs)
 
 
-def test_coverage_old_names_no_product_and_suspect_gaps(tmp_path):
-    days = [date(2026, 7, d) for d in range(28, 32)] + [date(2026, 8, d) for d in range(1, 4)]
-    cov = pl.DataFrame({"date": days * 2, "sensor_set": ["SNPP"] * 7 + ["AQUA"] * 7,
-                        "has_data": [True] * 14, "suspect_gap": [False, True] + [False] * 12})
-    cov.write_parquet(tmp_path / "coverage.parquet")
-    td = pl.DataFrame({"sensor_set": ["VIIRS_SNPP"], "date": [date(2026, 7, 31)], "product": ["SP"]})
-    a = day_index("2026-07-28")
-    runs = H.coverage_from_parquet(tmp_path / "coverage.parquet", n_days=day_index("2026-08-03") + 1, td=td)
-    assert runs == [("VIIRS_SNPP", "SP", a, a, True), ("VIIRS_SNPP", "SP", a + 1, a + 1, False),      # suspect day = gap
-                    ("VIIRS_SNPP", "SP", a + 2, a + 3, True), ("VIIRS_SNPP", "NRT", a + 4, a + 6, True)]
-    assert H.last_covered_day(runs) == "2026-08-03"                                             # AQUA is skipped
+def test_coverage_reader_treats_suspect_gap_as_no_data(tmp_path):
+    rows = [(date(2015, 11, 1), "VIIRS_SNPP", True), (date(2015, 11, 2), "VIIRS_SNPP", True)]
+    path = _coverage_file(tmp_path, rows, {"product": ["SP", "NRT"], "suspect_gap": [False, True]})
+    runs = H.coverage_from_parquet(path, day_index("2015-11-30") + 1)
+    a = day_index("2015-11-01")
+    assert runs == [(C.SNPP_SET, "SP", a, a, True), (C.SNPP_SET, "NRT", a + 1, a + 1, False)]
+
+
+def test_last_covered_day_is_the_as_of_date():
+    cov = load("coverage.json")
+    runs = [tuple(r) for r in zip(*(cov["columns"][k] for k in ("sensor_set", "product", "start", "end", "has_data")))]
+    named = [(cov["sensor_sets"][s], cov["products"][p], a, b, h) for s, p, a, b, h in runs]
+    assert load("manifest.json")["as_of"] == load("narratives.json")["as_of"] == H.last_covered_day(named)
+    assert not validate_file("coverage", D / "coverage.json") and cov["sensor_sets"] == C.SENSOR_SETS
+
+
+def test_regions_reader_refuses_a_tile_mismatch():
+    tiles = pl.read_parquet(C.PROCESSED_DIR / "tiles.parquet")
+    with pytest.raises(ValueError):
+        H.regions_from_m1({"presets": {"indian_punjab": ["not_a_tile"]}}, tiles)
+    out = H.regions_from_m1({"in_scope_tile_count": {"r5": 11, "r7": 77}, "boundary_source": "test"}, tiles, "X (control)")
+    by = {r["id"]: r for r in out["regions"]}
+    assert by["punjab_haryana"]["tiles_in_scope"]["r5"] == 11 and by["haryana"]["tiles_in_scope"]["r5"] is None
+    assert by["control"]["label"] == "X (control)" and by["indian_punjab"]["boundary_source"] == "test"
+
+
+def test_placeholders_are_never_passed_off_as_real():
+    v = load("validation.json")
+    assert v["nrt_seam"]["status"] == "pending" and v["nrt_seam"]["result"] is None
+    for key in C.FALLBACK_KEYS:
+        assert v[key]["owner"] == "M3" and v[key]["reviewer"] == C.FALLBACK_REVIEWER
+    for key, block in v.items():
+        if isinstance(block, dict) and "owner" in block:
+            assert block["owner"] != block["reviewer"], key
+
+# ---------------------------------------------------------------------- build
+
+def _flags(n, vdays=(), mdays=(), nrt=()):
+    f = {k: np.zeros(n, bool) for k in ("vday", "mday", "nrt", "relay")}
+    for key, days in (("vday", vdays), ("mday", mdays), ("nrt", nrt)):
+        f[key][list(days)] = True
+    return f
+
+
+def test_month_label_rules():
+    n = day_index("2026-11-13") + 1
+    a = day_index("2012-01-01")
+    part = _flags(n, vdays=range(a + 19, a + 31), mdays=range(a, a + 19))
+    assert B.month_label("2012-01", part, "2026-11-13") == "Estimated"         # under 80% VIIRS days
+    b = day_index("2015-11-01")
+    assert B.month_label("2015-11", _flags(n, vdays=range(b, b + 30)), "2026-11-13") == "Measured"
+    assert B.month_label("2015-11", _flags(n, vdays=range(b, b + 30), nrt=[b + 29]), "2026-11-13") == "Provisional"
+    c = day_index("2001-11-01")
+    assert B.month_label("2001-11", _flags(n, mdays=range(c, c + 30)), "2026-11-13") == "Indicative"
+
+
+def test_manifest_paths_use_forward_slashes_and_match_disk():
+    m = load("manifest.json")
+    names = [f["path"] for f in m["files"]]
+    assert not any("\\" in n for n in names) and any(n.startswith("hotspots/") for n in names)
+    assert all((D / n).exists() for n in names)
+    assert B.contract_of("hotspots/hotspots_haryana_2026.csv") == "hotspots_csv"
+    assert B.contract_of("tile_month_2015.json") == "tile_month"
+
+
+def test_json_files_use_unix_newlines():
+    for p in list(D.glob("*.json")) + list((D / "hotspots").glob("*.csv")):
+        assert b"\r\n" not in p.read_bytes(), p.name
+
+
+def test_tile_geometry_matches_the_tile_table():
+    g = load("tile_geometry.json")
+    tiles = pl.read_parquet(C.PROCESSED_DIR / "tiles.parquet").filter(pl.col("region").is_in(C.BASE_REGIONS))
+    assert len(g["tiles"]) == tiles.height and set(g["tiles"]) == set(tiles["h3_r6"].to_list())

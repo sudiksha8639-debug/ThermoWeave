@@ -8,8 +8,8 @@ from .contracts import CONTRACTS, PARQUET
 HEADER = f"""# EMBERWISE data contract (schema_version {C.SCHEMA_VERSION})
 
 Generated from `pipeline/tables/contracts.py`. Do not edit by hand.
-Owner: M3. Deputy: M6 (additive changes only while M3 sleeps, H16-20). Protocol: `CHANGELOG.md`.
-Source: Build Plan v4, Section 5. Anything the plan does not state is marked [verify].
+Owner: M3. Deputy: M6 (additive changes only). Protocol: `CHANGELOG.md`.
+Source: Build Plan v4, Section 5.
 
 ## Rules that apply to every file
 
@@ -56,25 +56,24 @@ def rows(s: dict, prefix: str = "") -> list[tuple[str, str, str]]:
 
 def main() -> None:
     parts = [HEADER, "## Web files (`web/public/data/`)\n"]
+    first = f"presets.{C.PRESET_IDS[0]}"
     for name, (schema, pattern) in CONTRACTS.items():
         parts.append(f"### {name}: `{pattern}`\n\n{schema.get('description', '')}\n")
         parts.append("| field | type | meaning |\n|---|---|---|")
-        first = f"presets.{C.PRESET_IDS[0]}"
         for path, typ, desc in rows(schema):
-            if path.startswith("presets.") and not path.startswith(first):
+            if path.startswith("presets.") and not (path == first or path.startswith(first + ".") or path.startswith(first + "[")):
                 continue                                   # show one preset, not three copies
             parts.append(f"| `{path.replace(first, 'presets.<preset>', 1)}` | {typ} | {desc} |")
         parts.append("")
     parts.append("### hotspots_csv: `hotspots/hotspots_<preset>_<year>.csv`\n\n"
                  "M1 -> M4. Fetched only on download click; budgeted separately. Header:\n\n"
                  f"`{','.join(C.HOTSPOT_COLUMNS)}`\n")
-    parts.append("## Pipeline hand-offs (`data/processed/`, git-ignored)\n")
+    parts.append("## Pipeline hand-offs (repo-root `data/processed/`, git-ignored)\n")
     for name, (fname, cols, desc) in PARQUET.items():
         parts.append(f"### {name}: `{fname}`\n\n{desc}\n\n| column | kind |\n|---|---|")
         parts += [f"| `{c}` | {k} |" for c, k in cols.items()]
         parts.append("")
-    parts.append(f"`sensor_set` values: {', '.join(C.SENSOR_SETS)}. "
-                 f"`product` values: {', '.join(C.PRODUCTS)}.\n")
+    parts.append(f"`sensor_set` values: {', '.join(C.SENSOR_SETS)}. `product` values: {', '.join(C.PRODUCTS)}.\n")
     C.DOCS_DIR.mkdir(exist_ok=True)
     (C.DOCS_DIR / "schema.md").write_text("\n".join(parts), encoding="utf-8", newline="\n")
     print(f"wrote {C.DOCS_DIR / 'schema.md'}")
