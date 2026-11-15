@@ -28,6 +28,14 @@ const EXTRA: Record<string, { cls: string; title: string }> = {
     cls: 'bg-line/40 text-ink-dim border-line',
     title: 'Percentile rank of this month against the climatology baseline',
   },
+  'Not supplied': {
+    cls: 'bg-line/30 text-ink-dim border-dashed border-line',
+    title: 'The file this diagnostic needs has not been supplied yet',
+  },
+  'Development data': {
+    cls: 'bg-line/30 text-ink-dim border-line',
+    title: 'Bundled development mock data — not the official record',
+  },
   frac_burning: {
     cls: 'bg-line/30 text-ink-dim border-line',
     title: 'Fraction of the tile with a burning detection',

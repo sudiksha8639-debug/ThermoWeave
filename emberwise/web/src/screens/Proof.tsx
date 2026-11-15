@@ -7,16 +7,22 @@ import {
   loadHourly,
   loadPeriods,
   loadRegionDaily,
+  loadRegions,
   loadRelaySim,
   loadValidation,
 } from '../data';
-import { useData } from '../hooks';
+import { useData, useRegionMonthly } from '../hooks';
+import { DriftDiagnostic } from '../components/DriftChart';
+import { HideAYearPanel } from '../components/lab/HideAYear';
+import { RatioByYearPanel } from '../components/lab/RatioByYear';
+import { SaturationPanel } from '../components/lab/Saturation';
+import { SeamChecksPanel } from '../components/lab/SeamChecks';
 import type { ClimatologyRow, Period, RegionDailyRow } from '../types';
 import { LabelChip } from '../components/LabelChip';
 import { FireClockDialSlot } from '../components/FireClockDial';
 import { Meter, RawJson } from '../components/primitives';
 import { SeriesChartSlot } from '../components/SeriesChart';
-import { ACCENT, ACCENT_2, GAP_COLOR, INK, INK_DIM, LINE } from '../theme';
+import { ACCENT, ACCENT_2, GAP_COLOR, INK_DIM, LINE } from '../theme';
 
 type LabState = { loading: boolean; error: string | null; retry: () => void };
 
@@ -314,111 +320,18 @@ export function ConversionSlot() {
   );
 }
 
-function DriftChart({ rows }: { rows: { ym: number; hour: number }[] }) {
-  if (rows.length < 2) {
-    return <p className="py-8 text-center text-xs text-ink-dim">No drift rows loaded.</p>;
-  }
-  const W = 560;
-  const H = 190;
-  const M = { top: 14, right: 12, bottom: 24, left: 34 };
-  const values = rows.map((r) => r.hour);
-  const lo = Math.floor(Math.min(...values));
-  const hi = Math.ceil(Math.max(...values));
-  const x = (i: number) => scale(i, 0, rows.length - 1, M.left, W - M.right);
-  const y = (v: number) => scale(v, lo, hi, H - M.bottom, M.top);
-  const path = rows
-    .map((r, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(r.hour).toFixed(1)}`)
-    .join(' ');
-  const area = `${path} L${x(rows.length - 1).toFixed(1)},${y(lo).toFixed(1)} L${x(0).toFixed(
-    1
-  )},${y(lo).toFixed(1)} Z`;
-  const yearMarks = rows
-    .map((r, i) => ({ i, year: Math.floor(r.ym / 12), month: r.ym % 12 }))
-    .filter((r) => r.month === 0);
-  const first = values[0];
-  const last = values[values.length - 1];
-
-  return (
-    <>
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        className="w-full"
-        role="img"
-        aria-label="Median local observing hour by month"
-      >
-        {Array.from({ length: hi - lo + 1 }, (_, i) => lo + i).map((t) => (
-          <g key={t}>
-            <line
-              x1={M.left}
-              x2={W - M.right}
-              y1={y(t)}
-              y2={y(t)}
-              stroke={LINE}
-              strokeWidth={0.6}
-              strokeDasharray="2 4"
-              opacity={0.45}
-            />
-            <text x={M.left - 7} y={y(t) + 3} fontSize={9} fill={INK_DIM} textAnchor="end">
-              {t}h
-            </text>
-          </g>
-        ))}
-        {yearMarks.map((m) => (
-          <g key={m.year}>
-            <line
-              x1={x(m.i)}
-              x2={x(m.i)}
-              y1={M.top}
-              y2={H - M.bottom}
-              stroke={LINE}
-              strokeWidth={0.5}
-              opacity={0.4}
-            />
-            <text x={x(m.i)} y={H - 8} fontSize={9} fill={INK_DIM} textAnchor="middle">
-              {m.year}
-            </text>
-          </g>
-        ))}
-        <path d={area} fill={ACCENT} opacity={0.08} />
-        <path d={path} fill="none" stroke={ACCENT} strokeWidth={1.9} strokeLinejoin="round" />
-        <circle cx={x(0)} cy={y(first)} r={2.6} fill={ACCENT} />
-        <text x={x(0) + 5} y={y(first) + 10} fontSize={9} fill={INK}>
-          {first.toFixed(1)}h
-        </text>
-        <circle cx={x(rows.length - 1)} cy={y(last)} r={2.6} fill={ACCENT} />
-        <text x={x(rows.length - 1) - 5} y={y(last) + 10} fontSize={9} fill={INK} textAnchor="end">
-          {last.toFixed(1)}h
-        </text>
-      </svg>
-      <p className="mt-1.5 text-[11px] leading-relaxed text-ink-dim">
-        Median local solar hour drifts seasonally between{' '}
-        <span className="font-mono text-ink">{Math.min(...values).toFixed(1)}h</span> and{' '}
-        <span className="font-mono text-ink">{Math.max(...values).toFixed(1)}h</span> — read the
-        Fire Clock Dial with that shift in mind.
-      </p>
-    </>
-  );
-}
-
 export function DriftSlot() {
   const q = useData(loadDrift, []);
-  const rows = useMemo(() => {
-    const raw = (q.data?.rows as { ym?: unknown; median_local_hour?: unknown }[] | undefined) ?? [];
-    return raw
-      .map((r) => ({ ym: Number(r.ym), hour: Number(r.median_local_hour) }))
-      .filter((r) => Number.isFinite(r.ym) && Number.isFinite(r.hour))
-      .sort((a, b) => a.ym - b.ym);
-  }, [q.data]);
 
   return (
     <LabCard
       title="Observing-time drift"
       chip="Indicative"
-      subtitle="Median local observing hour per month — the geometry behind the Fire Clock Dial."
+      subtitle="Median local acquisition hour per satellite per year, with the spread where the file supplies it — the geometry behind the Fire Clock Dial."
       state={q}
       raw={q.data}
     >
-      <DriftChart rows={rows} />
+      <DriftDiagnostic data={q.data} />
     </LabCard>
   );
 }
@@ -848,6 +761,81 @@ export function PeriodsSlot() {
   );
 }
 
+function TransparencyLab() {
+  const [regionPick, setRegionPick] = useState('punjab_haryana');
+  const regionsQ = useData(loadRegions, []);
+  const monthly = useRegionMonthly(regionPick);
+  const dailyQ = useData(loadRegionDaily, []);
+  const validationQ = useData(loadValidation, []);
+
+  const regions = regionsQ.data?.regions ?? [];
+  const presets = regions.filter((r) => r.kind === 'preset');
+  const region = regions.find((r) => r.id === regionPick);
+  const dailyRows = useMemo(
+    () => (dailyQ.data?.rows ?? []).filter((r) => r.region === regionPick),
+    [dailyQ.data, regionPick]
+  );
+
+  return (
+    <section className="space-y-4" aria-labelledby="lab-heading">
+      <div className="card flex flex-wrap items-end justify-between gap-3 p-4">
+        <div>
+          <h2 id="lab-heading" className="card-title card-title-lg">
+            Transparency Lab
+          </h2>
+          <p className="mt-1 max-w-2xl text-[11.5px] leading-relaxed text-ink-dim">
+            Hide-a-year, both 2026 seams, saturation and the ratio by year. Failures and missing
+            files are shown rather than hidden — a panel with no data says exactly what it needs.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="seg" role="group" aria-label="Diagnostics region">
+            {(presets.length ? presets : regions).map((r) => (
+              <button
+                key={r.id}
+                className="seg-item capitalize"
+                aria-pressed={r.id === regionPick}
+                onClick={() => setRegionPick(r.id)}
+              >
+                {monthLabel(r.label)}
+              </button>
+            ))}
+          </div>
+          <LabelChip label="Development data" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
+        <HideAYearPanel
+          months={monthly.months}
+          loading={monthly.loading}
+          error={monthly.error}
+          onRetry={monthly.retry}
+          regionLabel={region?.label ?? null}
+        />
+        <SeamChecksPanel
+          validation={validationQ.data}
+          dailyRows={dailyRows}
+          loading={validationQ.loading || dailyQ.loading}
+          error={validationQ.error || dailyQ.error}
+        />
+        <RatioByYearPanel
+          months={monthly.months}
+          loading={monthly.loading}
+          error={monthly.error}
+          onRetry={monthly.retry}
+        />
+        <SaturationPanel
+          months={monthly.months}
+          loading={monthly.loading}
+          error={monthly.error}
+          onRetry={monthly.retry}
+        />
+      </div>
+    </section>
+  );
+}
+
 function ReadingKey() {
   return (
     <section className="card flex flex-col p-4">
@@ -917,6 +905,8 @@ export function Proof() {
           </span>
         </div>
       </section>
+
+      <TransparencyLab />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <ValidationSlot />
