@@ -386,34 +386,106 @@ function adaptTileGeometry(raw: unknown): TileGeometryFile {
 
 // tile_month_YYYY.json — columnar; columns resolved by name downstream.
 function adaptTileMonth(raw: unknown, year: number): TileMonthFile {
-  const problems: string[] = [];
   const file = `tile_month_${year}`;
+
   if (!isObj(raw)) {
-    throw new DataShapeError(file, ['root: expected object with columns + data']);
+    throw new DataShapeError(file, ['root: expected object']);
   }
-  const columns = varray(problems, 'columns', raw.columns);
-  if (!columns || columns.some((c) => typeof c !== 'string')) {
-    problems.push('columns: expected array of strings');
-  }
-  const cols = (columns ?? []).filter((c): c is string => typeof c === 'string');
-  for (const need of ['tile', 'ym']) {
-    if (!cols.includes(need)) problems.push(`columns: missing required column "${need}"`);
-  }
-  const data = varray(problems, 'data', raw.data);
-  (data ?? []).forEach((row, i) => {
-    if (!Array.isArray(row)) {
-      problems.push(`data[${i}]: expected array row`);
-      return;
+
+  // Existing row-based format: keep backward compatibility.
+  if (Array.isArray(raw.columns) && Array.isArray(raw.data)) {
+    const cols = raw.columns as string[];
+    const data = raw.data as TileMonthFile['data'];
+
+    if (!cols.includes('tile') || !cols.includes('ym')) {
+      throw new DataShapeError(file, ['missing tile or ym column']);
     }
-    if (cols.length && row.length !== cols.length) {
-      problems.push(`data[${i}]: ${row.length} cells but ${cols.length} columns`);
+
+    return {
+      year: typeof raw.year === 'number' ? raw.year : year,
+      columns: cols,
+      data,
+    };
+  }
+
+  // M1 compressed columnar format.
+  const source = raw.columns;
+  const blocks = raw.blocks;
+
+  if (!isObj(source) || !isObj(blocks)) {
+    throw new DataShapeError(file, ['invalid compressed columns or blocks']);
+  }
+
+  const fields = [
+    'tile', 'raw_hotspots', 'raw_tile_days', 'raw_modis',
+    'raw_viirs', 'harm', 'lo', 'hi', 'trust', 'frac_burning',
+  ] as const;
+
+  const arrays: Record<string, unknown[]> = {};
+
+  for (const field of fields) {
+    const values = source[field];
+    if (!Array.isArray(values)) {
+      throw new DataShapeError(file, [`missing column ${field}`]);
     }
-  });
-  if (problems.length) throw new DataShapeError(file, problems);
+    arrays[field] = values;
+  }
+
+  const length = arrays.tile.length;
+
+  if (fields.some((field) => arrays[field].length !== length)) {
+    throw new DataShapeError(file, ['column lengths do not match']);
+  }
+
+  const months = blocks.ym;
+  const labels = blocks.label;
+  const starts = blocks.start;
+  const labelCodes = raw.label_codes;
+
+  if (
+    !Array.isArray(months) ||
+    !Array.isArray(labels) ||
+    !Array.isArray(starts) ||
+    !Array.isArray(labelCodes) ||
+    starts.length !== months.length + 1
+  ) {
+    throw new DataShapeError(file, ['invalid month block metadata']);
+  }
+
+  const data: TileMonthFile['data'] = [];
+  let monthIndex = 0;
+
+  for (let i = 0; i < length; i++) {
+    while (
+      monthIndex + 1 < months.length &&
+      i >= (starts[monthIndex + 1] as number)
+    ) {
+      monthIndex++;
+    }
+
+    const labelIndex = labels[monthIndex] as number;
+    const label = labelCodes[labelIndex];
+
+    data.push([
+      arrays.tile[i] as number,
+      months[monthIndex] as number,
+      arrays.raw_hotspots[i] as number | null,
+      arrays.raw_tile_days[i] as number | null,
+      arrays.raw_modis[i] as number | null,
+      arrays.raw_viirs[i] as number | null,
+      arrays.harm[i] as number | null,
+      arrays.lo[i] as number | null,
+      arrays.hi[i] as number | null,
+      label as string,
+      arrays.trust[i] as number | null,
+      arrays.frac_burning[i] as number | null,
+    ]);
+  }
+
   return {
     year: typeof raw.year === 'number' ? raw.year : year,
-    columns: cols,
-    data: (data ?? []) as TileMonthFile['data'],
+    columns: [...TM_COLS],
+    data,
   };
 }
 
