@@ -56,7 +56,7 @@ export function aggregateTileMonths(
   inScope: Set<number> | null
 ): MonthAgg[] {
   const acc = new Map<number, MonthAgg>();
-
+  const fracCounts = new Map<number, number>();
   for (const file of files) {
     const cols = file.columns;
     for (const row of file.data) {
@@ -95,19 +95,27 @@ export function aggregateTileMonths(
       a.viirs = add(a.viirs, tmNum(row, cols, 'raw_viirs'));
       if (harm !== null) a.tiles += 1;
 
-      const frac = tmNum(row, cols, 'frac_burning');
+            const frac = tmNum(row, cols, 'frac_burning');
       if (frac !== null) {
         a.fracMean = add(a.fracMean, frac);
         a.fracMax = a.fracMax === null ? frac : Math.max(a.fracMax, frac);
         if (frac >= SAT_FRAC) a.nearSat += 1;
+
+        fracCounts.set(ym, (fracCounts.get(ym) ?? 0) + 1);
       }
     }
   }
 
   const out = [...acc.values()].sort((a, b) => a.ym - b.ym);
+
   for (const m of out) {
-    if (m.fracMean !== null && m.tiles > 0) m.fracMean = m.fracMean / m.tiles;
+    const count = fracCounts.get(m.ym) ?? 0;
+
+    if (m.fracMean !== null && count > 0) {
+      m.fracMean = m.fracMean / count;
+    }
   }
+
   return out;
 }
 

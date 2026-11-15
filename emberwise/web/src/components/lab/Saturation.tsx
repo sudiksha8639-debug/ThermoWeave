@@ -1,16 +1,14 @@
+
 import { useMemo } from 'react';
 import { LabelChip } from '../LabelChip';
 import { ACCENT, ACCENT_2, INK_DIM, LINE } from '../../theme';
-import { SaturationFlag } from '../SaturationFlag';
 import { fmt, monthShort, type MonthAgg } from '../../lib/derive';
 
 const THRESHOLD = 0.5;
-const THIRD_THRESHOLD = 0.75;
 
 /**
- * Saturation flag: the fraction of in-scope tiles burning beside the
- * harmonized value. Above about 50% the index flattens at the peak, so the
- * fraction and the raw hotspot view have to be read together.
+ * Shows the average tile-month burning fraction.
+ * Each tile-month fraction is harm / days in the month.
  */
 export function SaturationPanel({
   months,
@@ -30,13 +28,17 @@ export function SaturationPanel({
         .sort((a, b) => (b.fracMean ?? 0) - (a.fracMean ?? 0)),
     [months]
   );
+
   const near = rows.filter((m) => (m.fracMean ?? 0) >= THRESHOLD);
   const peak = rows[0] ?? null;
 
   const W = 560;
   const H = 170;
   const M = { top: 14, right: 12, bottom: 24, left: 36 };
-  const recent = useMemo(() => months.filter((m) => m.fracMean !== null).slice(-24), [months]);
+  const recent = useMemo(
+    () => months.filter((m) => m.fracMean !== null).slice(-24),
+    [months]
+  );
   const maxFrac = Math.max(THRESHOLD * 1.2, ...recent.map((m) => m.fracMean ?? 0));
   const bw = (W - M.left - M.right) / Math.max(1, recent.length);
   const x = (i: number) => M.left + i * bw;
@@ -47,18 +49,18 @@ export function SaturationPanel({
       <header className="mb-2 flex items-start justify-between gap-3">
         <div>
           <h2 id="sat-title" className="card-title">
-            Saturation flag
+            Tile-month burning fraction
           </h2>
           <p className="mt-1 text-[11px] leading-relaxed text-ink-dim">
-            Share of in-scope tiles burning each month. When much of the region is burning, the
-            tile-day index flattens at the peak — read the fraction and the raw hotspot calendar
-            view together.
+            Average fraction of days with burning activity per in-scope tile.
+            Read this alongside the raw hotspot calendar view.
           </p>
         </div>
         <LabelChip label="Measured" />
       </header>
 
       {loading && <p className="py-8 text-center text-xs text-ink-dim">Loading fractions…</p>}
+
       {error && !loading && (
         <p className="flex flex-wrap items-center gap-2 py-6 text-xs text-red-300">
           <span>{error}</span>
@@ -71,28 +73,20 @@ export function SaturationPanel({
       {!loading && !error && rows.length === 0 && (
         <p className="py-8 text-center text-xs text-ink-dim">
           No <span className="font-mono">frac_burning</span> column in the loaded tile-month files,
-          so saturation cannot be shown. This is a missing field, not a zero.
+          so this metric cannot be shown. This is a missing field, not a zero.
         </p>
       )}
 
       {!loading && !error && rows.length > 0 && (
         <>
           <div className="mb-3 flex flex-wrap items-center gap-2">
-            <span
-              className={`rounded-full border px-2.5 py-1 text-[10.5px] ${
-                near.length > 0
-                  ? 'border-amber-400/40 bg-amber-400/10 text-amber-200'
-                  : 'border-accent-2/40 bg-accent-2/10 text-accent-2'
-              }`}
-            >
-              {near.length > 0
-                ? `${near.length} month${near.length === 1 ? '' : 's'} at or above 50% of tiles burning`
-                : 'No month at or above 50% of tiles burning'}
+            <span className="rounded-full border border-accent-2/40 bg-accent-2/10 px-2.5 py-1 text-[10.5px] text-accent-2">
+              {near.length} month{near.length === 1 ? '' : 's'} at or above 50% average tile-month fraction
             </span>
             {peak && (
               <span className="text-[10.5px] text-ink-dim">
-                Peak {peak.year}-{String(peak.month).padStart(2, '0')} · {fmt((peak.fracMean ?? 0) * 100, 1)}% of
-                tiles
+                Highest: {peak.year}-{String(peak.month).padStart(2, '0')} ·{' '}
+                {fmt((peak.fracMean ?? 0) * 100, 1)}%
               </span>
             )}
           </div>
@@ -101,7 +95,7 @@ export function SaturationPanel({
             viewBox={`0 0 ${W} ${H}`}
             className="w-full"
             role="img"
-            aria-label="Fraction of in-scope tiles burning by month with the saturation threshold"
+            aria-label="Average tile-month burning fraction by month"
           >
             {[0, THRESHOLD, 1].map((t) => (
               <g key={t}>
@@ -128,9 +122,11 @@ export function SaturationPanel({
                 )}
               </g>
             ))}
+
             {recent.map((m, i) => {
               const v = m.fracMean ?? 0;
               const hot = v >= THRESHOLD;
+
               return (
                 <g key={m.ym}>
                   <rect
@@ -142,11 +138,11 @@ export function SaturationPanel({
                     fill={hot ? ACCENT : ACCENT_2}
                     opacity={hot ? 0.9 : 0.55}
                   >
-                    <title>{`${m.year}-${String(m.month).padStart(2, '0')}: ${fmt(
-                      v * 100,
-                      1
-                    )}% of tiles burned · ${m.nearSat} tiles ≥50%`}</title>
+                    <title>
+                      {`${m.year}-${String(m.month).padStart(2, '0')}: ${fmt(v * 100, 1)}% average tile-month fraction · ${m.nearSat} tile-month rows ≥50%`}
+                    </title>
                   </rect>
+
                   {i % 3 === 0 && (
                     <text
                       x={x(i) + bw / 2}
@@ -161,19 +157,20 @@ export function SaturationPanel({
                 </g>
               );
             })}
+
             <text x={M.left} y={M.top - 4} fontSize={8.5} fill={INK_DIM}>
-              last {recent.length} months · fraction of tiles burning
+              Last {recent.length} months · average tile-month fraction
             </text>
           </svg>
 
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-ink-dim">
             <span className="inline-flex items-center gap-1.5">
               <span className="h-2.5 w-4 rounded-sm" style={{ background: ACCENT_2, opacity: 0.55 }} />
-              below 50%
+              Below 50%
             </span>
             <span className="inline-flex items-center gap-1.5">
               <span className="h-2.5 w-4 rounded-sm" style={{ background: ACCENT }} />
-              near saturation
+              At or above 50%
             </span>
           </div>
 
@@ -184,9 +181,8 @@ export function SaturationPanel({
                   <span className="font-mono text-ink">
                     {m.year}-{String(m.month).padStart(2, '0')}
                   </span>
-                  <SaturationFlag fracBuring={m.fracMax} />
                   <span className="text-ink-dim">
-                    {m.nearSat} tiles at or above 50% of their own area
+                    {m.nearSat} tile-month rows at or above 50%
                   </span>
                 </li>
               ))}
@@ -194,9 +190,8 @@ export function SaturationPanel({
           )}
 
           <p className="mt-2 text-[10px] leading-relaxed text-ink-dim">
-            Tile-days flatten when most tiles are already burning, so a peak week understates how
-            much more fire there was. Fractions above {Math.round(THIRD_THRESHOLD * 100)}% of tiles
-            are treated as strongly saturated.
+            Each tile-month fraction is calculated as harmonized tile-days divided by days in that
+            month. Higher values indicate more days with burning activity within a tile.
           </p>
         </>
       )}
